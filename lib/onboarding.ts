@@ -4,9 +4,16 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 import { normaliseTeachingType, type OfferedCourseType } from "@/lib/course-type";
+import { loadStudentClasses, type StudentContext } from "@/lib/student";
 
 /**
- * Onboarding access control and progress, both derived from the database.
+ * Signed-in user classification, plus onboarding access control and progress —
+ * all derived from the database.
+ *
+ * `loadUserState` is the one place that answers "who is this request", so `/`,
+ * `/join/[code]`, `/onboarding/*` and `/student` cannot disagree about it. The
+ * student half of that answer is loaded by `lib/student.ts`; everything below
+ * the union is the teacher half.
  *
  * There is no `onboarding_completed` column and none is being added, so progress
  * is inferred from the rows that onboarding actually creates:
@@ -37,21 +44,29 @@ export type TeacherContext = {
 };
 
 /**
- * Who is asking, from onboarding's point of view.
+ * Who is asking.
  *
- * Three outcomes rather than a nullable teacher, because `/` needs to tell a
- * signed-in student from a visitor and a nullable value cannot.
+ * `app_role` is `('teacher', 'student')`, and this union now says so. It
+ * previously stopped at "teacher or not", which meant a student — the other
+ * half of the product — was classified by what they are not, and shared an arm
+ * with genuine failures. `/` could then only offer them a teacher's page or a
+ * shrug, so a student who had just joined a class was told to go and join one.
  *
- * Both signed-in variants carry the email: `/` names the account it is signed in
- * as, and it is the only identifier available when the profile read failed.
+ * `not-teacher` survives as what it should always have been: the arm for an
+ * account that cannot currently be placed. A deactivated profile, an unreadable
+ * one, or a role this build does not know about. It is not a student.
+ *
+ * Every signed-in variant carries the email: `/` names the account it is signed
+ * in as, and it is the only identifier left when the profile read failed.
  */
-export type TeacherState =
+export type UserState =
   | { kind: "anonymous" }
   | { kind: "not-teacher"; userId: string; email: string | null }
-  | { kind: "teacher"; teacher: TeacherContext };
+  | { kind: "teacher"; teacher: TeacherContext }
+  | { kind: "student"; student: StudentContext };
 
 /**
- * Reads the caller's onboarding state without redirecting.
+ * Classifies the caller without redirecting.
  *
  * `getUser()` rather than `getClaims()`: this gates writes, so it is worth the
  * round trip to the Auth server to be sure the session has not been revoked and
@@ -62,7 +77,7 @@ export type TeacherState =
  * right for an access decision, and the RLS policies would refuse the writes
  * anyway.
  */
-export async function loadTeacherState(): Promise<TeacherState> {
+export async function loadUserState(): Promise<UserState> {
   const supabase = await createClient();
 
   const {
@@ -70,6 +85,12 @@ export async function loadTeacherState(): Promise<TeacherState> {
   } = await supabase.auth.getUser();
 
   if (!user) return { kind: "anonymous" };
+
+  const unplaceable: UserState = {
+    kind: "not-teacher",
+    userId: user.id,
+    email: user.email ?? null,
+  };
 
   const { data: profile, error } = await supabase
     .from("profiles")
@@ -82,17 +103,35 @@ export async function loadTeacherState(): Promise<TeacherState> {
       code: error.code,
       message: error.message,
     });
-    return { kind: "not-teacher", userId: user.id, email: user.email ?? null };
+    return unplaceable;
   }
 
-  // A student, a deactivated teacher, or an account with no readable profile
-  // row has no business in the teacher wizard. `deactivated_at` is checked here
-  // because `app.is_teacher()` checks it too — a deactivated teacher's writes
-  // would be refused by every policy, so sending them into the wizard would
-  // only produce failures further in.
-  if (!profile || profile.role !== "teacher" || profile.deactivated_at !== null) {
-    return { kind: "not-teacher", userId: user.id, email: user.email ?? null };
+  if (!profile) return unplaceable;
+
+  // Checked before the role split, not inside the teacher branch, because
+  // `app.is_teacher()` checks it too: a deactivated teacher's writes are
+  // refused by every policy, so sending them into the wizard would only
+  // produce failures further in. Extending the same rule to a deactivated
+  // student is the conservative reading — an account that has been switched
+  // off should not be handed a signed-in destination of any kind.
+  if (profile.deactivated_at !== null) return unplaceable;
+
+  if (profile.role === "student") {
+    return {
+      kind: "student",
+      student: {
+        userId: user.id,
+        email: user.email ?? null,
+        fullName: profile.full_name,
+        classes: await loadStudentClasses(supabase, user.id),
+      },
+    };
   }
+
+  // Unreachable while app_role is ('teacher', 'student') — and deliberately
+  // kept, so that adding a third role fails closed here rather than falling
+  // through into the teacher branch.
+  if (profile.role !== "teacher") return unplaceable;
 
   const { data: classes, error: classError } = await supabase
     .from("classes")
@@ -107,7 +146,7 @@ export async function loadTeacherState(): Promise<TeacherState> {
       code: classError.code,
       message: classError.message,
     });
-    return { kind: "not-teacher", userId: user.id, email: user.email ?? null };
+    return unplaceable;
   }
 
   return {
@@ -133,13 +172,15 @@ export async function loadTeacherState(): Promise<TeacherState> {
  * nothing.
  */
 export async function requireTeacher(): Promise<TeacherContext> {
-  const state = await loadTeacherState();
+  const state = await loadUserState();
 
   if (state.kind === "anonymous") {
     redirect("/auth/login");
   }
 
-  if (state.kind === "not-teacher") {
+  // `/` is where a student or an unplaceable account gets sorted out; it will
+  // move a student on to `/student` rather than bounce them back here.
+  if (state.kind !== "teacher") {
     redirect("/");
   }
 

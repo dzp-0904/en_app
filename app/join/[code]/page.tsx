@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { LABELS, isOfferedCourseType } from "@/lib/course-type";
 import { toInvitePreview } from "@/lib/invite-preview";
-import { loadTeacherState } from "@/lib/onboarding";
+import { loadUserState } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
 import { createClient } from "@/lib/supabase/server";
 
@@ -106,7 +106,7 @@ export default async function JoinPage({
   });
   const preview = toInvitePreview(data?.[0]);
 
-  const state = await loadTeacherState();
+  const state = await loadUserState();
 
   // Only ever shown to someone signed in: the success state is reached by
   // redirect from the join action, and `?joined=` on its own proves nothing.

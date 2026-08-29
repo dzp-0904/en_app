@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 
 import { LogoMark } from "@/components/brand/logo-mark";
 import { Button } from "@/components/ui/button";
-import { isOnboardingComplete, loadTeacherState } from "@/lib/onboarding";
+import { isOnboardingComplete, loadUserState } from "@/lib/onboarding";
 import { readPendingJoin } from "@/lib/pending-join";
 
 import { signOut } from "./auth/actions";
@@ -37,25 +37,7 @@ const POINTS = [
 ];
 
 export default async function Home() {
-  const state = await loadTeacherState();
-
-  if (state.kind !== "anonymous") {
-    // Someone followed an invitation, signed in, and landed back here. Take
-    // them to the class they were actually trying to reach. The cookie is
-    // cleared by the join page, on success or on "Not now", so this cannot
-    // trap them.
-    const pendingCode = await readPendingJoin();
-
-    if (pendingCode) {
-      redirect(`/join/${encodeURIComponent(pendingCode)}`);
-    }
-
-    // A teacher with no class yet has not finished onboarding. `/onboarding`
-    // works out which step that is.
-    if (state.kind === "teacher" && !isOnboardingComplete(state.teacher)) {
-      redirect("/onboarding");
-    }
-  }
+  const state = await loadUserState();
 
   if (state.kind === "anonymous") {
     return (
@@ -96,6 +78,34 @@ export default async function Home() {
     );
   }
 
+  // Everything below is a signed-in user being sorted. The three redirects are
+  // flat rather than nested so each one narrows `state` for the next — and so
+  // that only the two arms with nowhere else to go reach the render.
+
+  // Someone followed an invitation, signed in, and landed back here. Take them
+  // to the class they were actually trying to reach. The cookie is cleared by
+  // the join page, on success or on "Not now", so this cannot trap them.
+  const pendingCode = await readPendingJoin();
+
+  if (pendingCode) {
+    redirect(`/join/${encodeURIComponent(pendingCode)}`);
+  }
+
+  // Students get their own page whether or not they are in a class yet:
+  // `/student` shows the roll or the waiting state, and either way it is a
+  // student's answer rather than a teacher's page with the words changed.
+  // Never `/onboarding` — that wizard creates classes, which students do not do
+  // and which RLS would refuse them anyway.
+  if (state.kind === "student") {
+    redirect("/student");
+  }
+
+  // A teacher with no class yet has not finished onboarding. `/onboarding`
+  // works out which step that is.
+  if (state.kind === "teacher" && !isOnboardingComplete(state.teacher)) {
+    redirect("/onboarding");
+  }
+
   const email = state.kind === "teacher" ? state.teacher.email : state.email;
 
   return (
@@ -118,12 +128,13 @@ export default async function Home() {
       <p className="mt-6 text-sm text-muted-foreground">
         {state.kind === "teacher"
           ? "Your class is ready. Invite students to it whenever you like."
-          : // Every new account is a student — app.handle_new_user hard-codes
-            // the role and there is no client-callable way to change it — so
-            // this is what a brand-new signup reads. It has to be honest that
-            // there is nothing for them to do yet rather than imply a missing
-            // screen.
-            "Your teacher will send you an invitation link. Open it to join their class."}
+          : // Only unplaceable accounts reach this line now — a deactivated
+            // profile, or one that could not be read. Students are redirected
+            // to `/student` above, so this deliberately no longer says "your
+            // teacher will send you an invitation link": that was written for
+            // an arm that held students, and it told anyone who had already
+            // joined a class to go and join one.
+            "This account doesn't have access to EduTrack right now. If you were invited to a class, open the invitation link your teacher sent you."}
       </p>
 
       <div className="mt-10 flex flex-col gap-3 sm:flex-row">

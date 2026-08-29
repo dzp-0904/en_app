@@ -1,0 +1,119 @@
+import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+
+import { signOut } from "@/app/auth/actions";
+import { LogoMark } from "@/components/brand/logo-mark";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { loadUserState } from "@/lib/onboarding";
+
+export const metadata: Metadata = {
+  title: "Your classes",
+};
+
+/**
+ * The student's home.
+ *
+ * Deliberately the minimum that proves the routing and the membership query
+ * work: who you are, which classes you are in, and a way out. There is no
+ * per-class page yet, so no card links anywhere — a button onto a 404 would be
+ * worse than the absence of one, and this page exists to be extended rather
+ * than to look finished.
+ *
+ * Access control is `loadUserState` and, underneath it, RLS. A teacher who
+ * types this URL is sent to `/`, which is where teachers are sorted; the query
+ * behind `state.student.classes` is pinned to `auth.uid()` by
+ * `class_members_student_select` regardless of what any page asks for.
+ */
+
+const JOINED = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+export default async function StudentPage() {
+  const state = await loadUserState();
+
+  if (state.kind === "anonymous") {
+    redirect("/auth/login");
+  }
+
+  // Teachers and unplaceable accounts are both `/`'s problem, not this page's.
+  if (state.kind !== "student") {
+    redirect("/");
+  }
+
+  const { fullName, email, classes } = state.student;
+
+  return (
+    <main className="flex flex-1 justify-center bg-background p-8">
+      <div className="w-full max-w-lg">
+        <LogoMark className="mb-12" />
+
+        <h1 className="mb-1 font-serif text-2xl leading-relaxed text-foreground">
+          Welcome, {fullName}
+        </h1>
+
+        {email ? (
+          <p className="mb-10 text-sm text-muted-foreground">
+            Signed in as{" "}
+            <span className="font-medium text-foreground">{email}</span>.
+          </p>
+        ) : null}
+
+        <h2 className="mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Your classes
+        </h2>
+
+        {classes === null ? (
+          // Distinct from "no classes" on purpose: the query failed, and
+          // telling someone who has joined a class that they have not is the
+          // exact bug this page was written to fix.
+          <Alert>
+            We couldn&apos;t load your classes just now. Please refresh the page.
+          </Alert>
+        ) : classes.length === 0 ? (
+          <Card>
+            <p className="text-sm text-muted-foreground">
+              You haven&apos;t joined a class yet. When your teacher sends you an
+              invitation link, open it to join.
+            </p>
+          </Card>
+        ) : (
+          <ul className="space-y-3">
+            {classes.map((entry) => (
+              <li key={entry.membershipId}>
+                <Card>
+                  <h3 className="mb-1 font-semibold text-foreground">
+                    {entry.className}
+                  </h3>
+
+                  {entry.teacherName ? (
+                    <p className="text-sm text-muted-foreground">
+                      Teacher: {entry.teacherName}
+                    </p>
+                  ) : null}
+
+                  {entry.joinedAt ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Joined {JOINED.format(new Date(entry.joinedAt))}
+                    </p>
+                  ) : null}
+                </Card>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <form action={signOut} className="mt-10">
+          <Button type="submit" variant="outline">
+            Sign out
+          </Button>
+        </form>
+      </div>
+    </main>
+  );
+}
