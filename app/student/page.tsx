@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { signOut } from "@/app/auth/actions";
@@ -16,10 +17,9 @@ export const metadata: Metadata = {
  * The student's home.
  *
  * Deliberately the minimum that proves the routing and the membership query
- * work: who you are, which classes you are in, and a way out. There is no
- * per-class page yet, so no card links anywhere — a button onto a 404 would be
- * worse than the absence of one, and this page exists to be extended rather
- * than to look finished.
+ * work: who you are, which classes you are in, a way into each one, and a way
+ * out. Everything about a class beyond its name lives on `/student/[classId]`,
+ * so this stays a list rather than growing into a dashboard.
  *
  * Access control is `loadUserState` and, underneath it, RLS. A teacher who
  * types this URL is sent to `/`, which is where teachers are sorted; the query
@@ -102,6 +102,14 @@ export default async function StudentPage() {
                       Joined {JOINED.format(new Date(entry.joinedAt))}
                     </p>
                   ) : null}
+
+                  {/* A plain link, not a clickable card: the whole surface
+                      being a target would swallow anything added to it later,
+                      and a link is what a keyboard and a screen reader can
+                      actually find. */}
+                  <Button asChild variant="outline" size="sm" className="mt-4">
+                    <Link href={`/student/${entry.classId}`}>Open class</Link>
+                  </Button>
                 </Card>
               </li>
             ))}
