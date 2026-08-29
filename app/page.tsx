@@ -106,44 +106,38 @@ export default async function Home() {
     redirect("/onboarding");
   }
 
-  const email = state.kind === "teacher" ? state.teacher.email : state.email;
+  // And one who has finished now has somewhere to be. Previously this page
+  // greeted them and offered `/onboarding/invite`, which sent a teacher back
+  // into the setup wizard to do everyday work — and always into their most
+  // recent class, because that is the only one onboarding knows about.
+  // `/teacher` lists all of them.
+  if (state.kind === "teacher") {
+    redirect("/teacher");
+  }
 
+  // Only unplaceable accounts get this far: a deactivated profile, or one that
+  // could not be read. Every other arm has been redirected above.
   return (
     <Shell>
       <h1 className="mb-4 font-serif text-2xl leading-relaxed text-foreground">
-        {state.kind === "teacher"
-          ? `Welcome back, ${state.teacher.fullName}.`
-          : "You're signed in."}
+        You&apos;re signed in.
       </h1>
 
       {/* Named rather than merely acknowledged: this is the page that has to
           answer "did the confirmation link work, and as whom?". */}
-      {email ? (
+      {state.email ? (
         <p className="text-sm text-muted-foreground">
           Signed in as{" "}
-          <span className="font-medium text-foreground">{email}</span>.
+          <span className="font-medium text-foreground">{state.email}</span>.
         </p>
       ) : null}
 
       <p className="mt-6 text-sm text-muted-foreground">
-        {state.kind === "teacher"
-          ? "Your class is ready. Invite students to it whenever you like."
-          : // Only unplaceable accounts reach this line now — a deactivated
-            // profile, or one that could not be read. Students are redirected
-            // to `/student` above, so this deliberately no longer says "your
-            // teacher will send you an invitation link": that was written for
-            // an arm that held students, and it told anyone who had already
-            // joined a class to go and join one.
-            "This account doesn't have access to EduTrack right now. If you were invited to a class, open the invitation link your teacher sent you."}
+        This account doesn&apos;t have access to EduTrack right now. If you were
+        invited to a class, open the invitation link your teacher sent you.
       </p>
 
       <div className="mt-10 flex flex-col gap-3 sm:flex-row">
-        {state.kind === "teacher" ? (
-          <Button asChild className="sm:flex-1">
-            <Link href="/onboarding/invite">Invite students</Link>
-          </Button>
-        ) : null}
-
         <form action={signOut} className="sm:flex-1">
           <Button type="submit" variant="outline" className="w-full">
             Sign out
