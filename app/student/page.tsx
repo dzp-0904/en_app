@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { signOut } from "@/app/auth/actions";
-import { LogoMark } from "@/components/brand/logo-mark";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -25,6 +23,9 @@ export const metadata: Metadata = {
  * types this URL is sent to `/`, which is where teachers are sorted; the query
  * behind `state.student.classes` is pinned to `auth.uid()` by
  * `class_members_student_select` regardless of what any page asks for.
+ *
+ * The brand, the account and the way out live in the application shell that
+ * `app/student/layout.tsx` wraps this in, so they are not repeated below.
  */
 
 const JOINED = new Intl.DateTimeFormat("en-GB", {
@@ -46,23 +47,14 @@ export default async function StudentPage() {
     redirect("/");
   }
 
-  const { fullName, email, classes } = state.student;
+  const { fullName, classes } = state.student;
 
   return (
     <main className="flex flex-1 justify-center bg-background p-8">
       <div className="w-full max-w-lg">
-        <LogoMark className="mb-12" />
-
-        <h1 className="mb-1 font-serif text-2xl leading-relaxed text-foreground">
+        <h1 className="mb-10 font-serif text-2xl leading-relaxed text-foreground">
           Welcome, {fullName}
         </h1>
-
-        {email ? (
-          <p className="mb-10 text-sm text-muted-foreground">
-            Signed in as{" "}
-            <span className="font-medium text-foreground">{email}</span>.
-          </p>
-        ) : null}
 
         <h2 className="mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
           Your classes
@@ -115,12 +107,6 @@ export default async function StudentPage() {
             ))}
           </ul>
         )}
-
-        <form action={signOut} className="mt-10">
-          <Button type="submit" variant="outline">
-            Sign out
-          </Button>
-        </form>
       </div>
     </main>
   );

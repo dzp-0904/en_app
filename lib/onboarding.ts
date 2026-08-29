@@ -1,6 +1,7 @@
 import "server-only";
 
 import { redirect } from "next/navigation";
+import { cache } from "react";
 
 import { createClient } from "@/lib/supabase/server";
 import { normaliseTeachingType, type OfferedCourseType } from "@/lib/course-type";
@@ -76,8 +77,17 @@ export type UserState =
  * A profile that cannot be read at all reports `not-teacher`. Failing closed is
  * right for an access decision, and the RLS policies would refuse the writes
  * anyway.
+ *
+ * Memoised for the duration of one request with React's `cache`. The shell
+ * layout and the page inside it both have to ask who the caller is — the layout
+ * to name them in the sidebar, the page to decide whether to serve them — and
+ * without this every authenticated page would make two `auth.getUser()` round
+ * trips and two profile reads. The scope is a single request, so the answer
+ * cannot go stale inside it, and nothing here writes.
  */
-export async function loadUserState(): Promise<UserState> {
+export const loadUserState = cache(readUserState);
+
+async function readUserState(): Promise<UserState> {
   const supabase = await createClient();
 
   const {

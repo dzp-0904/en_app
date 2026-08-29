@@ -1,6 +1,5 @@
 import Link from "next/link";
 
-import { LogoMark } from "@/components/brand/logo-mark";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -18,8 +17,6 @@ export default function ClassNotFound() {
   return (
     <main className="flex flex-1 justify-center bg-background p-8">
       <div className="w-full max-w-lg">
-        <LogoMark className="mb-12" />
-
         <Card>
           <h1 className="mb-2 text-xl font-semibold text-foreground">
             We couldn&apos;t find that class

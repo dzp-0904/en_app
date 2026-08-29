@@ -1,21 +1,30 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import {
   isOfferedCourseType,
   scoringModelFor,
   targetBandFor,
+  type OfferedCourseType,
+  type ScoringModel,
 } from "@/lib/course-type";
 import { invitationEmail } from "@/lib/mail/invitation-email";
 import { MailNotConfiguredError, sendMail } from "@/lib/mail/mailer";
 import { requireTeacher } from "@/lib/onboarding";
+import { isClassId } from "@/lib/teacher";
 import { joinUrl } from "@/lib/site-url";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * Onboarding Server Actions.
+ * Onboarding Server Actions, plus the two that write a class.
+ *
+ * `createClass` and `updateClass` live here rather than in a module of their
+ * own because they are the same form reaching the same table under the same
+ * rules: one `readClassFields` decides what a valid class looks like, and both
+ * write what it returns. Splitting them across two files would put those rules
+ * one import away from a second copy.
  *
  * Same shape as the auth actions, for the same reasons: plain `formData`
  * handlers so the forms submit without JavaScript, each one re-establishing the
@@ -33,6 +42,9 @@ const NAME_STEP = "/onboarding/name";
 const TEACHING_TYPE_STEP = "/onboarding/teaching-type";
 const CLASS_STEP = "/onboarding/class";
 const INVITE_STEP = "/onboarding/invite";
+
+/** The same form as `CLASS_STEP`, outside the wizard. See `createClass`. */
+const NEW_CLASS_PAGE = "/teacher/new";
 
 /** Redirects with a message attached. Returns `never` so callers narrow. */
 function failTo(path: string, message: string): never {
@@ -173,10 +185,51 @@ async function createInviteCode(
   return null;
 }
 
-/** Step 3 — the first class, plus the invite code students will use. */
-export async function createFirstClass(formData: FormData) {
-  const teacher = await requireTeacher();
+/**
+ * The columns `ClassForm` is responsible for, once validated.
+ *
+ * A row rather than a handful of loose variables, so `createClass` and
+ * `updateClass` cannot disagree about which columns the form owns. Everything
+ * else `classes` holds — `teacher_id`, `description`, `timezone`,
+ * `default_tuition_rate_per_session`, `archived_at`, and the timestamps the
+ * `set_updated_at` trigger maintains — is absent from this shape on purpose, so
+ * an update built from it leaves all of them exactly as they were.
+ *
+ * `course_type_other` is pinned to null rather than omitted.
+ * `classes_course_type_other_required` requires
+ * `(course_type = 'other') = (course_type_other is not null)`, and `COURSE_TYPES`
+ * never offers `other`, so null is the only value consistent with anything this
+ * form can submit. Omitting it would leave a stale custom name behind on an
+ * update and break the constraint.
+ */
+type ClassFields = {
+  name: string;
+  course_type: OfferedCourseType;
+  course_type_other: null;
+  scoring_model: ScoringModel;
+  target_band: number | null;
+  start_date: string;
+  end_date: string | null;
+  schedule_note: string | null;
+};
 
+/**
+ * Reads and validates a submitted class form, or sends the teacher back to it.
+ *
+ * The one description of what a valid class looks like. Creating and editing
+ * ask the same questions of the same table under the same CHECK constraints, so
+ * a second copy of these rules would be a second place for them to fall out of
+ * step with the schema — and the half that drifted would be found by a
+ * constraint violation in production rather than here.
+ *
+ * `formPath` is where a mistake returns to, and it is always a literal the
+ * server chose: the wizard step, `/teacher/new`, or the edit page for a class
+ * ownership has already been established on. Nothing on the form can name it.
+ *
+ * Returns `ClassFields` or does not return at all — `failTo` redirects — which
+ * is what lets callers use the result without narrowing it first.
+ */
+function readClassFields(formData: FormData, formPath: string): ClassFields {
   const name = String(formData.get("name") ?? "").trim();
   const courseTypeRaw = String(formData.get("course_type") ?? "").trim();
   const targetBandRaw = String(formData.get("target_band") ?? "").trim();
@@ -185,72 +238,120 @@ export async function createFirstClass(formData: FormData) {
   const scheduleNote = String(formData.get("schedule_note") ?? "").trim();
 
   if (!name) {
-    failTo(CLASS_STEP, "Give the class a name.");
+    failTo(formPath, "Give the class a name.");
   }
 
   // classes_name_length allows 1..200.
   if (name.length > 200) {
-    failTo(CLASS_STEP, "Please use a class name of 200 characters or fewer.");
+    failTo(formPath, "Please use a class name of 200 characters or fewer.");
   }
 
   if (!isOfferedCourseType(courseTypeRaw)) {
-    failTo(CLASS_STEP, "Choose a course type.");
+    failTo(formPath, "Choose a course type.");
   }
   const courseType = courseTypeRaw;
 
   if (!startDateRaw) {
-    failTo(CLASS_STEP, "Choose a start date.");
+    failTo(formPath, "Choose a start date.");
   }
 
   const startDate = readDate(startDateRaw);
   if (!startDate) {
-    failTo(CLASS_STEP, "That start date is not a real date.");
+    failTo(formPath, "That start date is not a real date.");
   }
 
+  // Absent is meaningful, not missing: clearing the field is how a teacher
+  // makes a class open-ended, and that has to be writable on an edit.
   let endDate: string | null = null;
   if (endDateRaw) {
     endDate = readDate(endDateRaw);
     if (!endDate) {
-      failTo(CLASS_STEP, "That end date is not a real date.");
+      failTo(formPath, "That end date is not a real date.");
     }
 
     // classes_end_after_start. Checked here so the teacher sees which field is
     // wrong instead of a constraint failure.
     if (endDate < startDate) {
-      failTo(CLASS_STEP, "The end date cannot be before the start date.");
+      failTo(formPath, "The end date cannot be before the start date.");
     }
   }
+
+  return {
+    name,
+    course_type: courseType,
+    // Derived, never submitted: these three have to satisfy
+    // classes_no_target_band_when_unscored and
+    // classes_course_type_other_required together, and only the server can be
+    // trusted to keep them consistent.
+    course_type_other: null,
+    scoring_model: scoringModelFor(courseType),
+    target_band: targetBandFor(courseType, targetBandRaw || null),
+    start_date: startDate,
+    end_date: endDate,
+    schedule_note: scheduleNote || null,
+  };
+}
+
+/**
+ * Creates a class, plus the invite code its students will use.
+ *
+ * This is step 3 of the wizard and it is also how a teacher adds their second
+ * class from `/teacher`. One action, because the two differ only in where the
+ * teacher goes afterwards — the row written, the validation applied and the
+ * ownership established are identical, and a second insertion path would be a
+ * second place for `classes`' CHECK constraints to be got wrong.
+ *
+ * That destination is derived from `teacher.currentClass`, which `requireTeacher`
+ * read from the database *before* this insert: no class yet means this is the
+ * first one and the wizard continues to the invite step; an existing class means
+ * this is everyday work and the teacher goes straight to the new class. The
+ * signal is a row, never a field on the form, so a submission cannot choose
+ * where it redirects to.
+ */
+export async function createClass(formData: FormData) {
+  const teacher = await requireTeacher();
+
+  // Whichever form was submitted is the one a mistake must return to, or the
+  // teacher loses what they typed and lands in a wizard they finished long ago.
+  const formPath = teacher.currentClass ? NEW_CLASS_PAGE : CLASS_STEP;
+
+  const fields = readClassFields(formData, formPath);
 
   const supabase = await createClient();
 
   const { data: created, error } = await supabase
     .from("classes")
-    .insert({
-      teacher_id: teacher.userId,
-      name,
-      course_type: courseType,
-      // Derived, never submitted: the pair has to satisfy
-      // classes_no_target_band_when_unscored, and only the server can be
-      // trusted to keep them consistent.
-      scoring_model: scoringModelFor(courseType),
-      target_band: targetBandFor(courseType, targetBandRaw || null),
-      start_date: startDate,
-      end_date: endDate,
-      schedule_note: scheduleNote || null,
-    })
+    // The one column the form does not supply, and the one that must not come
+    // from it: ownership is the authenticated user, full stop.
+    .insert({ teacher_id: teacher.userId, ...fields })
     .select("id")
     .single();
 
   if (error || !created) {
     logDbError("classes.insert", error ?? {});
-    failTo(CLASS_STEP, "We could not create the class. Please try again.");
+    failTo(formPath, "We could not create the class. Please try again.");
   }
 
   const code = await createInviteCode(supabase, created.id);
 
+  // A later class: the teacher goes to the class itself, which is both the
+  // confirmation that it exists and the page they were heading for anyway.
+  if (teacher.currentClass) {
+    // The list and the new detail page are both rendered per request, but the
+    // client router caches them across a redirect; without this the teacher can
+    // navigate back to a `/teacher` that is missing the class they just made.
+    revalidatePath("/teacher", "layout");
+
+    // No error parameter when the code is missing: `/teacher/[classId]` already
+    // reports that the class has no invitation link yet and to refresh, which is
+    // the whole of what went wrong and is truer than an alert on a page that
+    // otherwise shows a class created successfully.
+    redirect(`/teacher/${created.id}`);
+  }
+
   if (!code) {
-    // The class exists and is usable; only the shareable link is missing. Say
-    // so rather than implying the whole step failed.
+    // The first class exists and is usable; only the shareable link is missing.
+    // Say so rather than implying the whole step failed.
     failTo(
       INVITE_STEP,
       "The class was created, but we could not generate its invitation link. Please try again shortly.",
@@ -259,6 +360,77 @@ export async function createFirstClass(formData: FormData) {
 
   revalidatePath("/onboarding", "layout");
   redirect(INVITE_STEP);
+}
+
+/**
+ * Edits a class the teacher already owns.
+ *
+ * The counterpart to `createClass`, and deliberately the same shape: the same
+ * `readClassFields`, so the two write identical columns under identical rules,
+ * and the same refusal to take anything load-bearing off the form.
+ *
+ * `classId` is a bound argument, not a form field — the edit page supplies it
+ * from the URL segment it already rendered. That is not what authorises the
+ * write, and it is not treated as if it were. The filter below is
+ *
+ *   .eq("id", classId).eq("teacher_id", teacher.userId)
+ *
+ * so a class belonging to somebody else matches nothing and updates nothing,
+ * exactly as it reads nothing in `loadEditableClass`. Underneath that,
+ * `classes_teacher_all`'s WITH CHECK refuses the statement outright unless
+ * `teacher_id = auth.uid()` and `app.is_teacher()`. Three independent reasons
+ * this cannot touch another teacher's row; the URL is none of them.
+ *
+ * Nothing outside `classes` is written. The invitation code lives in
+ * `class_invite_codes` and is never read here, so an edit cannot rotate or
+ * revoke it; the roster lives in `class_members` and is likewise untouched. A
+ * student's view of the class updates because they were always reading the same
+ * row, not because anything of theirs was rewritten.
+ */
+export async function updateClass(classId: string, formData: FormData) {
+  const teacher = await requireTeacher();
+
+  // A segment that cannot name a class is a wrong link, not a server fault, and
+  // it is rejected before PostgREST can turn it into `22P02`.
+  if (!isClassId(classId)) {
+    notFound();
+  }
+
+  // Built from the segment the page was rendered at, never from a `return_to`
+  // or any other submitted field: a Server Function is a POST endpoint, and an
+  // attacker-chosen redirect target is exactly what one should not accept.
+  const editPath = `/teacher/${classId}/edit`;
+  const fields = readClassFields(formData, editPath);
+
+  const supabase = await createClient();
+
+  const { data: updated, error } = await supabase
+    .from("classes")
+    .update(fields)
+    .eq("id", classId)
+    .eq("teacher_id", teacher.userId)
+    // Archiving is not this milestone's to undo; an archived class is not
+    // visible anywhere in the teacher UI, so it is not editable either.
+    .is("archived_at", null)
+    .select("id");
+
+  if (error) {
+    logDbError("classes.update", error);
+    failTo(editPath, "We could not save your changes. Please try again.");
+  }
+
+  // Zero rows means the class is not this teacher's — or is archived, or is
+  // gone. Answered as "not found", the same way `loadEditableClass` answers it,
+  // so a failed update says nothing about whose class it was.
+  if (!updated || updated.length === 0) {
+    notFound();
+  }
+
+  // The list, the detail page and the edit form are all rendered per request,
+  // but the client router caches them across the redirect; without this the
+  // teacher can navigate back to a `/teacher` still showing the old name.
+  revalidatePath("/teacher", "layout");
+  redirect(`/teacher/${classId}`);
 }
 
 /**

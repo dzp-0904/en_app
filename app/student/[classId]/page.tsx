@@ -3,7 +3,6 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
-import { LogoMark } from "@/components/brand/logo-mark";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -173,8 +172,6 @@ function Frame({ children }: { children: ReactNode }) {
   return (
     <main className="flex flex-1 justify-center bg-background p-8">
       <div className="w-full max-w-lg">
-        <LogoMark className="mb-12" />
-
         <Button asChild variant="ghost" size="inline" className="mb-6 text-sm">
           <Link href="/student">← Back to classes</Link>
         </Button>

@@ -27,7 +27,15 @@ import type { createClient } from "@/lib/supabase/server";
  * them, so it is readable intent, not the control.
  */
 
-export type TeacherClass = {
+/**
+ * A class's own columns — everything `CLASS_COLUMNS` selects, and nothing that
+ * has to be counted or joined for.
+ *
+ * Split out from `TeacherClass` because the edit form needs exactly this and
+ * none of the rest: loading a roster and an invitation code to populate a text
+ * input would be two queries spent on values the form never shows.
+ */
+export type TeacherClassFields = {
   classId: string;
   className: string;
   courseType: CourseType;
@@ -38,6 +46,9 @@ export type TeacherClass = {
   startDate: string;
   endDate: string | null;
   scheduleNote: string | null;
+};
+
+export type TeacherClass = TeacherClassFields & {
   /** Members who have claimed their invitation and not been removed. */
   studentCount: number;
   /** Invitations sent but not yet claimed. */
@@ -88,9 +99,25 @@ export type TeacherClassResult =
   | { kind: "not-found" }
   | { kind: "error" };
 
+export type TeacherClassFieldsResult =
+  | { kind: "ok"; fields: TeacherClassFields }
+  | { kind: "not-found" }
+  | { kind: "error" };
+
 /** `classes.id` is a uuid column, so anything else cannot name a row. */
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Whether a string could name a class at all.
+ *
+ * Exported so `updateClass` applies the same rule the loaders do. Without it a
+ * mistyped id reaches PostgREST as `22P02 invalid input syntax for type uuid` —
+ * a database error where the truth is simply that no such class exists.
+ */
+export function isClassId(value: string): boolean {
+  return UUID.test(value);
+}
 
 /** The columns every class view needs, in one place so the two agree. */
 const CLASS_COLUMNS =
@@ -181,23 +208,29 @@ export async function loadTeacherClasses(
 }
 
 /**
- * Loads one class the teacher owns, with its roster.
+ * Loads one class the teacher owns — its own columns, nothing else.
  *
- * Ownership is not checked after the fact — `teacher_id` is part of the query,
- * so a `classId` belonging to someone else matches no row and there is nothing
- * to leak: not the name, not the roster, not the fact that the class exists.
- * `teacherId` is the value `getUser()` returned by way of `loadUserState`,
- * never anything off the URL or the form.
+ * The narrow half of `loadTeacherClass`, and the half that carries the
+ * authorisation: `teacher_id` is part of the WHERE clause, so a `classId`
+ * belonging to another teacher matches no row and comes back `not-found`. There
+ * is nothing to leak, because nothing was read — not the name, not the roster,
+ * not the invitation code, not the fact that the class exists at all.
  *
- * The uuid guard keeps the error arm meaningful. Handing PostgREST
- * `/teacher/nonsense` would come back as `22P02 invalid input syntax for type
- * uuid` — a mistyped link arriving in the shape of a server failure.
+ * `teacherId` is the value `getUser()` returned by way of `loadUserState`, never
+ * anything off the URL or a form.
+ *
+ * The three arms stay distinct on purpose. A failed query is `error`, not
+ * `not-found`: telling a teacher their class is gone when the database merely
+ * stumbled is the worse of the two mistakes, and it is the one a two-arm result
+ * would make.
  */
-export async function loadTeacherClass(
+export async function loadEditableClass(
   supabase: Awaited<ReturnType<typeof createClient>>,
   teacherId: string,
   classId: string,
-): Promise<TeacherClassResult> {
+): Promise<TeacherClassFieldsResult> {
+  // Before the round trip, so a mistyped link is a 404 rather than `22P02
+  // invalid input syntax for type uuid` arriving in the shape of a server fault.
   if (!UUID.test(classId)) return { kind: "not-found" };
 
   const { data: found, error } = await supabase
@@ -214,6 +247,37 @@ export async function loadTeacherClass(
   }
 
   if (!found) return { kind: "not-found" };
+
+  return {
+    kind: "ok",
+    fields: {
+      classId: found.id,
+      className: found.name,
+      courseType: found.course_type,
+      courseTypeOther: found.course_type_other,
+      targetBand: found.target_band,
+      startDate: found.start_date,
+      endDate: found.end_date,
+      scheduleNote: found.schedule_note,
+    },
+  };
+}
+
+/**
+ * Loads one class the teacher owns, with its roster.
+ *
+ * `loadEditableClass` does the ownership half, and its result is passed straight
+ * through: a class belonging to someone else is `not-found` before the roster
+ * query is ever issued, so a stranger's class leaks neither its members nor its
+ * existence. Everything below runs only once that has returned `ok`.
+ */
+export async function loadTeacherClass(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  teacherId: string,
+  classId: string,
+): Promise<TeacherClassResult> {
+  const owned = await loadEditableClass(supabase, teacherId, classId);
+  if (owned.kind !== "ok") return owned;
 
   // Only now that ownership is established. A left join on the profile, not
   // `!inner`: a pending invitation has no `student_id` yet, and requiring one
@@ -258,14 +322,7 @@ export async function loadTeacherClass(
   return {
     kind: "ok",
     detail: {
-      classId: found.id,
-      className: found.name,
-      courseType: found.course_type,
-      courseTypeOther: found.course_type_other,
-      targetBand: found.target_band,
-      startDate: found.start_date,
-      endDate: found.end_date,
-      scheduleNote: found.schedule_note,
+      ...owned.fields,
       studentCount: roster.filter((entry) => entry.status === "joined").length,
       pendingCount: roster.filter((entry) => entry.status === "invited").length,
       roster,
