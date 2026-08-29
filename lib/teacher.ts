@@ -46,6 +46,12 @@ export type TeacherClassFields = {
   startDate: string;
   endDate: string | null;
   scheduleNote: string | null;
+  /**
+   * The IANA zone the class meets in — `'Asia/Ho_Chi_Minh'` unless a row says
+   * otherwise. NOT NULL in the schema, and the wall clock every session time is
+   * written and read in. See `lib/time.ts`.
+   */
+  timezone: string;
 };
 
 export type TeacherClass = TeacherClassFields & {
@@ -104,6 +110,29 @@ export type TeacherClassFieldsResult =
   | { kind: "not-found" }
   | { kind: "error" };
 
+/**
+ * One lesson: an actual teaching occurrence of a class.
+ *
+ * A row of `class_sessions`, which belongs directly to `classes` — not to a
+ * membership. A session happens whether or not any particular student turns up,
+ * and `session_attendance (session_id, class_id)` is where the two meet later.
+ *
+ * `startsAt` and `endsAt` are the raw `timestamptz` values, i.e. instants, and
+ * are deliberately not formatted here: only `classes.timezone` says what clock
+ * they should be read on, so `lib/time.ts` does that at the point of display.
+ *
+ * There is no lesson number in the schema, and none is invented here. Position
+ * in this list — which is ordered by `startsAt` — is the only ordinal there is.
+ */
+export type ClassSession = {
+  sessionId: string;
+  startsAt: string;
+  endsAt: string;
+  /** Optional in the schema; a lesson may simply be the date it happened on. */
+  title: string | null;
+  status: "scheduled" | "completed" | "cancelled";
+};
+
 /** `classes.id` and `class_members.id` are uuid columns. */
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -122,7 +151,7 @@ export function isUuid(value: string): boolean {
 
 /** The columns every class view needs, in one place so the two agree. */
 const CLASS_COLUMNS =
-  "id, name, course_type, course_type_other, target_band, start_date, end_date, schedule_note";
+  "id, name, course_type, course_type_other, target_band, start_date, end_date, schedule_note, timezone";
 
 /** Roster statuses that describe a present person. See `RosterEntry`. */
 const PRESENT: ("joined" | "invited")[] = ["joined", "invited"];
@@ -203,6 +232,7 @@ export async function loadTeacherClasses(
     startDate: row.start_date,
     endDate: row.end_date,
     scheduleNote: row.schedule_note,
+    timezone: row.timezone,
     studentCount: joined.get(row.id) ?? 0,
     pendingCount: pending.get(row.id) ?? 0,
   }));
@@ -260,6 +290,7 @@ export async function loadEditableClass(
       startDate: found.start_date,
       endDate: found.end_date,
       scheduleNote: found.schedule_note,
+      timezone: found.timezone,
     },
   };
 }
@@ -378,4 +409,51 @@ export async function loadInviteCode(
   );
 
   return usable?.code ?? null;
+}
+
+/**
+ * Every lesson recorded against one class, earliest first.
+ *
+ * A separate loader rather than another field on `loadTeacherClass`, for the
+ * same reason the counts are a separate query: a class page whose session list
+ * fails should still show the class, its invitation link and its roster, with
+ * the failure confined to the section that could not be read. Folding this into
+ * the three-arm result would turn one failed query into a whole-page error.
+ *
+ * `null` means the query failed and `[]` means the class has no lessons yet —
+ * the module's rule throughout, and the distinction the class page needs in
+ * order to avoid announcing "no lessons" on the strength of a database fault.
+ *
+ * No `teacher_id` filter, because there is no `teacher_id` on this table to
+ * filter by. Callers reach here only after `loadEditableClass` has proved the
+ * class is theirs, and underneath that `class_sessions_teacher_all` admits only
+ * `app.my_class_ids()`, so a `classId` the caller does not own returns nothing
+ * even if a future caller forgets the check. Same arrangement as
+ * `loadInviteCode`.
+ */
+export async function loadClassSessions(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+): Promise<ClassSession[] | null> {
+  const { data, error } = await supabase
+    .from("class_sessions")
+    .select("id, starts_at, ends_at, title, status")
+    .eq("class_id", classId)
+    // Chronological, which is also what the `(class_id, starts_at)` unique
+    // constraint's index already orders — the schema's own note in
+    // `20260828000600_indexes.sql` says it serves exactly this scan.
+    .order("starts_at", { ascending: true });
+
+  if (error) {
+    logDbError("class_sessions.select", error);
+    return null;
+  }
+
+  return (data ?? []).map((row) => ({
+    sessionId: row.id,
+    startsAt: row.starts_at,
+    endsAt: row.ends_at,
+    title: row.title,
+    status: row.status,
+  }));
 }

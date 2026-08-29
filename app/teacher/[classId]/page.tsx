@@ -16,7 +16,14 @@ import { loadUserState } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
 import { joinUrl } from "@/lib/site-url";
 import { createClient } from "@/lib/supabase/server";
-import { loadTeacherClass, type RosterEntry, type TeacherClassDetail } from "@/lib/teacher";
+import {
+  loadClassSessions,
+  loadTeacherClass,
+  type ClassSession,
+  type RosterEntry,
+  type TeacherClassDetail,
+} from "@/lib/teacher";
+import { formatZonedDate, formatZonedTime } from "@/lib/time";
 
 import { cancelInvitation, removeStudent, resendInvitation } from "./actions";
 
@@ -125,6 +132,14 @@ export default async function TeacherClassPage({
   const { detail } = result;
   const link = detail.inviteCode ? await joinUrl(detail.inviteCode) : null;
 
+  // Loaded separately from the class itself so that a failure here costs the
+  // teacher the lesson list and nothing else — the facts, the invitation link
+  // and the roster above are already in hand. `null` is that failure, and it is
+  // deliberately not `[]`: "no lessons have been recorded yet" is a claim about
+  // the class, and the page is not entitled to make it on the strength of a
+  // query that did not come back.
+  const sessions = await loadClassSessions(supabase, detail.classId);
+
   // Every action on this page — inviting, removing, cancelling, resending —
   // reports failure the same way: by redirecting back with the message
   // attached, so the page stays a Server Component and each form works without
@@ -214,6 +229,47 @@ export default async function TeacherClassPage({
           </p>
         </Card>
       )}
+
+      <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        Lessons
+      </h2>
+
+      {sessions === null ? (
+        <Alert>
+          We couldn&apos;t load this class&apos;s lessons just now. Please
+          refresh the page.
+        </Alert>
+      ) : sessions.length === 0 ? (
+        <Card>
+          <p className="text-sm text-muted-foreground">
+            No lessons have been recorded yet.
+          </p>
+        </Card>
+      ) : (
+        <ul className="space-y-3">
+          {sessions.map((session, index) => (
+            <li key={session.sessionId}>
+              <Card>
+                <Lesson
+                  session={session}
+                  timezone={detail.timezone}
+                  ordinal={index + 1}
+                />
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Offered in all three states, including the failed one: whether the
+          list could be read has no bearing on whether a lesson can be added. */}
+      <div className="mt-4">
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/teacher/${detail.classId}/sessions/new`}>
+            Create lesson
+          </Link>
+        </Button>
+      </div>
 
       <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
         Students ({students.length})
@@ -310,6 +366,58 @@ export default async function TeacherClassPage({
         </>
       ) : null}
     </Frame>
+  );
+}
+
+/**
+ * One lesson: when it is, and what it is called.
+ *
+ * Date and time first, title after, because a lesson is identified by when it
+ * happened — the title is the optional part, and most rows will not have one.
+ *
+ * Both are read on the class's own clock. `starts_at` is an instant, so
+ * formatting it without naming a zone would show a Vietnamese evening class as
+ * having met the previous afternoon on a server running in UTC.
+ *
+ * `ordinal` is the row's position in the chronological list, not a stored lesson
+ * number — `class_sessions` has no such column, and the only order it defines is
+ * `starts_at`. It is used solely to give an untitled lesson something to be
+ * called, and it therefore renumbers if a lesson is later inserted between two
+ * others, which is the honest behaviour for a derived position.
+ */
+function Lesson({
+  session,
+  timezone,
+  ordinal,
+}: {
+  session: ClassSession;
+  timezone: string;
+  ordinal: number;
+}) {
+  return (
+    <>
+      <h3 className="font-semibold text-foreground">
+        {formatZonedDate(timezone, session.startsAt)}
+      </h3>
+
+      <p className="mt-1 text-sm text-muted-foreground">
+        {formatZonedTime(timezone, session.startsAt)} –{" "}
+        {formatZonedTime(timezone, session.endsAt)}
+      </p>
+
+      <p className="mt-2 text-sm text-foreground">
+        {session.title ?? `Lesson ${ordinal}`}
+      </p>
+
+      {/* Everything this page creates is `scheduled`, the column's default, so
+          saying so on every row would be noise. The other two states can only
+          arrive from elsewhere, and hiding them would misreport the class. */}
+      {session.status === "scheduled" ? null : (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {session.status === "cancelled" ? "Cancelled" : "Completed"}
+        </p>
+      )}
+    </>
   );
 }
 

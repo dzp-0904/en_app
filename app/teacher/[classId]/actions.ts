@@ -6,28 +6,37 @@ import { notFound, redirect } from "next/navigation";
 import { inviteStudentByEmail } from "@/app/onboarding/actions";
 import { requireTeacher } from "@/lib/onboarding";
 import { createClient } from "@/lib/supabase/server";
-import { isUuid, loadEditableClass } from "@/lib/teacher";
+import {
+  isUuid,
+  loadEditableClass,
+  type TeacherClassFields,
+} from "@/lib/teacher";
+import { instantOf } from "@/lib/time";
 
 /**
- * Roster management for one class: remove a student, cancel an invitation,
- * resend one.
+ * Everything a teacher does to one class from its own page: manage the roster —
+ * remove a student, cancel an invitation, resend one — and record a lesson.
  *
- * All three are the same shape as `updateClass`, for the same reasons. A Server
+ * All four are the same shape as `updateClass`, for the same reasons. A Server
  * Function is a POST endpoint, so each one re-establishes who is calling
  * through `requireTeacher()` and re-establishes what they own through
  * `loadEditableClass()` — the fact that the only link to it sits on a page that
- * already did both is not a guard.
+ * already did both is not a guard. `authoriseClass` is that pair, written once.
  *
- * Neither bound argument is trusted. `classId` names the class and
- * `membershipId` names the row; `authoriseRoster` turns the first into an
- * ownership decision, and every write below carries `.eq("class_id", classId)`
- * alongside `.eq("id", membershipId)` so a membership id from somebody else's
- * class matches nothing and writes nothing. Underneath both,
- * `class_members_teacher_all` refuses any statement touching a class outside
- * `app.my_class_ids()`. The URL selects a row; it does not grant one.
+ * No bound argument is trusted. `classId` names the class and `membershipId`
+ * names the row; `authoriseClass` turns the first into an ownership decision,
+ * and every roster write carries `.eq("class_id", classId)` alongside
+ * `.eq("id", membershipId)` so a membership id from somebody else's class
+ * matches nothing and writes nothing. Underneath both,
+ * `class_members_teacher_all` and `class_sessions_teacher_all` refuse any
+ * statement touching a class outside `app.my_class_ids()`. The URL selects a
+ * row; it does not grant one.
  *
- * None of them takes a `FormData` at all. There is nothing on these forms to
- * read, so the actions cannot be made to read anything.
+ * Only `createSession` takes a `FormData`, because only it has anything to
+ * read: a date, two times and a title. The three roster actions take none at
+ * all, so there is nothing on those forms an attacker could put a value into.
+ * Neither kind takes a teacher id, a class-ownership flag or a redirect target
+ * — those are derived, every time, from the session cookie and the URL segment.
  *
  * Removal is soft — `removed_at`, never DELETE. Six composite foreign keys in
  * `20260828000400` and `20260828000500` reference `class_members (id, class_id)`
@@ -57,24 +66,31 @@ function logDbError(
 }
 
 /**
- * Establishes the caller, the class they own, and where a failure returns to.
+ * Establishes the caller and that the class named by the URL is theirs.
  *
- * The order is deliberate. Ownership is settled *before* the membership id is
- * looked at, so a request naming another teacher's class gets the same 404 it
- * would get for a class that does not exist, whatever it put in the second
- * argument — a forger cannot learn from the difference between "not your class"
- * and "no such member".
+ * The single gate every action in this file passes through, and the whole of
+ * the authorisation: an authenticated user, resolved to a teacher, resolved to
+ * a class that teacher owns. The `classId` chooses which class to ask about; the
+ * answer comes from `loadEditableClass`, whose `teacher_id` filter is the
+ * authenticated user's id and nothing the browser sent.
  *
- * The returned path is built from the bound segment, which has already been
- * proven to be a uuid naming a class this teacher owns. Nothing submitted can
- * name a redirect destination.
+ * Under it, unchanged and untouched, `classes_teacher_all` and
+ * `class_sessions_teacher_all` resolve through `app.my_class_ids()`, so a
+ * statement aimed at another teacher's class matches no rows even if this check
+ * were removed. Two layers that agree; only one of them is the application's.
+ *
+ * `failPath` is where a failed *read* returns to, and is always built by the
+ * caller from the bound segment. Nothing submitted can name a destination.
+ *
+ * The class's own columns come back with the decision, so callers that need one
+ * — `createSession` needs `timezone` — do not pay for a second lookup.
  */
-async function authoriseRoster(
+async function authoriseClass(
   classId: string,
-  membershipId: string,
+  failPath: string,
 ): Promise<{
   supabase: Awaited<ReturnType<typeof createClient>>;
-  classPath: string;
+  fields: TeacherClassFields;
 }> {
   const teacher = await requireTeacher();
 
@@ -83,7 +99,6 @@ async function authoriseRoster(
     notFound();
   }
 
-  const classPath = `/teacher/${classId}`;
   const supabase = await createClient();
 
   // The same loader the class page and the edit page use, filtered by the
@@ -97,8 +112,30 @@ async function authoriseRoster(
 
   if (owned.kind === "error") {
     // A failed read is not "no such class". See `updateClass`.
-    failTo(classPath, "We could not load this class. Please try again.");
+    failTo(failPath, "We could not load this class. Please try again.");
   }
+
+  return { supabase, fields: owned.fields };
+}
+
+/**
+ * The same gate, plus the shape of the second id a roster action carries.
+ *
+ * The order is deliberate. Ownership is settled *before* the membership id is
+ * looked at, so a request naming another teacher's class gets the same 404 it
+ * would get for a class that does not exist, whatever it put in the second
+ * argument — a forger cannot learn from the difference between "not your class"
+ * and "no such member".
+ */
+async function authoriseRoster(
+  classId: string,
+  membershipId: string,
+): Promise<{
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  classPath: string;
+}> {
+  const classPath = `/teacher/${classId}`;
+  const { supabase } = await authoriseClass(classId, classPath);
 
   if (!isUuid(membershipId)) {
     failTo(classPath, "That person is no longer on this class list.");
@@ -261,4 +298,120 @@ export async function resendInvitation(classId: string, membershipId: string) {
   // Redirects, so nothing after this runs. `requireTeacher` is memoised per
   // request, so re-establishing identity inside it costs nothing.
   await inviteStudentByEmail(classId, "class", formData);
+}
+
+/** `<input type="date">` submits `YYYY-MM-DD`, and nothing else does. */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * `<input type="time">` submits `HH:MM`, or `HH:MM:SS` when a sub-minute step
+ * is set. Neither form has a step, but accepting seconds costs one group and
+ * means a browser that sends them is not turned away for it.
+ */
+const ISO_TIME = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+
+/** One submitted field as a trimmed string; absent and non-text alike as "". */
+function readText(formData: FormData, name: string): string {
+  const raw = formData.get(name);
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+/**
+ * A real calendar date, or null.
+ *
+ * The same round-trip check `readDate` makes in `app/onboarding/actions.ts`: the
+ * pattern alone would accept 2026-02-31, which `Date.UTC` silently rolls
+ * forward to 3 March rather than rejecting.
+ */
+function readCalendarDate(raw: string): string | null {
+  if (!ISO_DATE.test(raw)) return null;
+
+  const parsed = new Date(`${raw}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  return parsed.toISOString().slice(0, 10) === raw ? raw : null;
+}
+
+/**
+ * Records one lesson against this class.
+ *
+ * A `class_sessions` row, which is the schema's own representation of "this
+ * class met, or will meet, at this time" — the table attendance, lesson logs and
+ * homework already hang their `session_id` off. Nothing new is introduced to
+ * hold a lesson, and nothing here duplicates `classes.schedule_note`, which the
+ * migration itself labels display-only with `class_sessions` authoritative.
+ *
+ * The form supplies a date, two times and an optional title. It does not supply
+ * the class — that is the bound segment — and it does not supply the teacher,
+ * which is never a field at all: `authoriseClass` re-derives it from the session
+ * cookie on every call, so a request that names another teacher's class is a
+ * 404 before a single value is read off the form.
+ *
+ * Times are wall-clock in `classes.timezone` and are converted once, here, by
+ * `instantOf`. See `lib/time.ts` for why that is not `new Date(...)`.
+ *
+ * `status` is left to its `'scheduled'` default and `ends_at > starts_at` is
+ * checked before the insert as well as by the table — the constraint is the
+ * guarantee, this is the sentence the teacher can act on.
+ */
+export async function createSession(classId: string, formData: FormData) {
+  const newPath = `/teacher/${classId}/sessions/new`;
+  const { supabase, fields } = await authoriseClass(classId, newPath);
+
+  const date = readCalendarDate(readText(formData, "date"));
+
+  if (!date) {
+    failTo(newPath, "Please choose a date for this lesson.");
+  }
+
+  const startTime = readText(formData, "start_time");
+  const endTime = readText(formData, "end_time");
+
+  if (!ISO_TIME.test(startTime) || !ISO_TIME.test(endTime)) {
+    failTo(newPath, "Please enter a start time and an end time.");
+  }
+
+  const startsAt = instantOf(fields.timezone, date, startTime);
+  const endsAt = instantOf(fields.timezone, date, endTime);
+
+  // Mirrors `class_sessions_ends_after_starts`. A lesson running past midnight
+  // would need a second date to express, which this form does not ask for, so
+  // the two times are read on the one day the teacher chose.
+  if (endsAt.getTime() <= startsAt.getTime()) {
+    failTo(newPath, "The end time must be after the start time.");
+  }
+
+  const title = readText(formData, "title");
+
+  if (title.length > 200) {
+    failTo(newPath, "That lesson title is too long.");
+  }
+
+  const { error } = await supabase.from("class_sessions").insert({
+    // The one column the form does not supply, and the one that must not come
+    // from it. See `createClass`.
+    class_id: classId,
+    starts_at: startsAt.toISOString(),
+    ends_at: endsAt.toISOString(),
+    // Empty is meaningful: an untitled lesson is the date it happened on, and
+    // "" would be a title that renders as a blank line.
+    title: title === "" ? null : title,
+  });
+
+  if (error) {
+    // `class_sessions_class_starts_key` is unique over (class_id, starts_at).
+    // The constraint stays the enforcement; this is only its wording. Checking
+    // for the row first would be both a second query and a race.
+    if (error.code === "23505") {
+      failTo(newPath, "This class already has a lesson starting at that time.");
+    }
+
+    logDbError("class_sessions.insert", error);
+    failTo(newPath, "We could not save this lesson. Please try again.");
+  }
+
+  // The class page lists the lessons and the sidebar is drawn from the same
+  // layout, both cached by the client router across the redirect.
+  revalidatePath("/teacher", "layout");
+  redirect(`/teacher/${classId}`);
 }
