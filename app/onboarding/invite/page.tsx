@@ -7,15 +7,27 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { requireClass, requireTeacher } from "@/lib/onboarding";
+import { requireFirstClass, requireTeacher } from "@/lib/onboarding";
 import type { PageSearchParams } from "@/lib/route-types";
 import { joinUrl } from "@/lib/site-url";
 import { createClient } from "@/lib/supabase/server";
+import { loadInviteCode } from "@/lib/teacher";
 
 import { inviteStudentByEmail } from "../actions";
 
 /**
- * Step 4 — share the class.
+ * Step 4 — share the first class.
+ *
+ * This is the tail of first-class onboarding and nothing else. `createClass`
+ * redirects here when the teacher had no class before the insert, which is the
+ * only path that reaches it: no navigation offers it, `/` sends a completed
+ * teacher to `/teacher`, and `resumeHref` no longer names it either. What is
+ * left is someone typing the URL, and `requireFirstClass` turns that into
+ * `/teacher` as soon as there is more than one class to have meant.
+ *
+ * Everyday invitation lives at `/teacher/[classId]`, which offers the same link
+ * and the same email form for a class the teacher picked rather than the one
+ * that happens to be newest.
  *
  * The invitation list is read back from `class_members` rather than accumulated
  * in component state, so it survives a reload and shows the truth: a row is
@@ -28,23 +40,19 @@ import { inviteStudentByEmail } from "../actions";
  */
 export default async function InvitePage({ searchParams }: PageSearchParams) {
   const teacher = await requireTeacher();
-  const currentClass = requireClass(teacher);
+  const currentClass = requireFirstClass(teacher);
 
   const params = await searchParams;
   const error = typeof params.error === "string" ? params.error : undefined;
 
   const supabase = await createClient();
 
-  const [{ data: invite }, { data: members }] = await Promise.all([
-    supabase
-      .from("class_invite_codes")
-      .select("code")
-      .eq("class_id", currentClass.id)
-      .eq("is_active", true)
-      .is("revoked_at", null)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+  const [code, { data: members }] = await Promise.all([
+    // Shared with `/teacher/[classId]`, and applying all four of the rules
+    // `get_class_invite_preview` applies. The query this replaced checked only
+    // `is_active` and `revoked_at`, so an expired or exhausted code was printed
+    // here as a working link and refused at `/join/[code]`.
+    loadInviteCode(supabase, currentClass.id),
     supabase
       .from("class_members")
       .select("id, invited_email, join_status, invite_email_sent_at")
@@ -54,7 +62,7 @@ export default async function InvitePage({ searchParams }: PageSearchParams) {
       .order("invited_at", { ascending: true }),
   ]);
 
-  const link = invite ? await joinUrl(invite.code) : null;
+  const link = code ? await joinUrl(code) : null;
 
   return (
     <OnboardingShell
@@ -81,7 +89,10 @@ export default async function InvitePage({ searchParams }: PageSearchParams) {
         </Alert>
       )}
 
-      <form action={inviteStudentByEmail} className="space-y-1.5">
+      <form
+        action={inviteStudentByEmail.bind(null, currentClass.id, "onboarding")}
+        className="space-y-1.5"
+      >
         <Label htmlFor="email">Or invite by email</Label>
         <div className="flex items-start gap-2">
           <Input

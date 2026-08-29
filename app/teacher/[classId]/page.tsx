@@ -3,10 +3,14 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { inviteStudentByEmail } from "@/app/onboarding/actions";
+import { SubmitButton } from "@/components/auth/submit-button";
 import { CopyField } from "@/components/onboarding/copy-field";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { LABELS, isOfferedCourseType } from "@/lib/course-type";
 import { loadUserState } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
@@ -76,6 +80,7 @@ function factsFor(detail: TeacherClassDetail): { term: string; value: string }[]
 
 export default async function TeacherClassPage({
   params,
+  searchParams,
 }: DynamicPageProps<{ classId: string }>) {
   const { classId } = await params;
 
@@ -118,6 +123,13 @@ export default async function TeacherClassPage({
   const { detail } = result;
   const link = detail.inviteCode ? await joinUrl(detail.inviteCode) : null;
 
+  // `inviteStudentByEmail` reports its failures the way every other action on
+  // this milestone does — by redirecting back with the message attached — so
+  // the page stays a Server Component and the form works without JavaScript.
+  const query = await searchParams;
+  const inviteError =
+    typeof query.error === "string" ? query.error : undefined;
+
   const students = detail.roster.filter((entry) => entry.status === "joined");
   const pending = detail.roster.filter((entry) => entry.status === "invited");
 
@@ -154,16 +166,44 @@ export default async function TeacherClassPage({
         Invite students
       </h2>
 
+      {inviteError ? <Alert className="mb-5">{inviteError}</Alert> : null}
+
       {link ? (
         <Card>
-          {/* The panel carries its own bottom margin for the onboarding step it
-              was built for; inside a card it is the only child, so remove it. */}
           <CopyField label="Class invitation link" value={link} />
-          <p className="-mt-1 text-sm text-muted-foreground">
+          <p className="-mt-1 mb-6 text-sm text-muted-foreground">
             Anyone with this link can join this class.
           </p>
+
+          {/* The same action the wizard's last step uses, bound to the class in
+              the URL rather than to whichever class happens to be newest. That
+              binding is not what authorises the write — the action re-reads the
+              class filtered by the authenticated teacher's id before it does
+              anything. Without this form, a teacher with more than one class
+              would have no way to invite by email at all, because the step that
+              used to offer it now sends them here. */}
+          <form
+            action={inviteStudentByEmail.bind(null, detail.classId, "class")}
+            className="space-y-1.5"
+          >
+            <Label htmlFor="email">Or invite by email</Label>
+            <div className="flex items-start gap-2">
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="off"
+                placeholder="student@email.com"
+                className="flex-1"
+                required
+              />
+              <SubmitButton pendingLabel="Sending…">Send</SubmitButton>
+            </div>
+          </form>
         </Card>
       ) : (
+        // No email form either: the invitation email carries the link, so with
+        // no usable code there is nothing to send.
         <Card>
           <p className="text-sm text-muted-foreground">
             This class has no active invitation link right now. Refresh the page

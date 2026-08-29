@@ -42,6 +42,16 @@ export type TeacherContext = {
   teachingType: OfferedCourseType | null;
   /** The teacher's most recent active class, or null before the class step. */
   currentClass: OnboardingClass | null;
+  /**
+   * Whether a second active class exists.
+   *
+   * The onboarding wizard was written when a teacher had exactly one class, so
+   * its last step talks about "the" class and means `currentClass` — the newest
+   * one. Once a teacher has several, that step cannot know which they meant, and
+   * this is the flag that lets it say so instead of guessing. See
+   * `requireFirstClass`.
+   */
+  hasMultipleClasses: boolean;
 };
 
 /**
@@ -149,7 +159,12 @@ async function readUserState(): Promise<UserState> {
     .eq("teacher_id", user.id)
     .is("archived_at", null)
     .order("created_at", { ascending: false })
-    .limit(1);
+    // Two, not one. The first row is `currentClass`; the second exists only to
+    // answer "is there more than one", which is what tells the onboarding
+    // wizard's last step that it is no longer the right page. Counting them all
+    // would read a teacher's whole class list on every authenticated request to
+    // learn a boolean.
+    .limit(2);
 
   if (classError) {
     console.error("[onboarding] failed to load classes", {
@@ -167,6 +182,7 @@ async function readUserState(): Promise<UserState> {
       fullName: profile.full_name,
       teachingType: normaliseTeachingType(profile.teaching_type),
       currentClass: classes?.[0] ?? null,
+      hasMultipleClasses: (classes?.length ?? 0) > 1,
     },
   };
 }
@@ -211,11 +227,19 @@ export type OnboardingStepIndex = 0 | 1 | 2 | 3;
  *
  * Only the two persisted signals are consulted, so this is stable across
  * devices and sessions.
+ *
+ * The last line used to return `/onboarding/invite`, under a condition
+ * character-for-character identical to `isOnboardingComplete`'s: a teacher who
+ * had finished setting up was sent back into the wizard's final step to do
+ * everyday work, and always into their most recent class, because that is the
+ * only one onboarding knows about. `/` had already stopped doing this; this was
+ * the door left open. A teacher with a class is done, and `/teacher` is where
+ * they choose which class they meant.
  */
 export function resumeHref(teacher: TeacherContext): string {
   if (teacher.teachingType === null) return "/onboarding/name";
   if (teacher.currentClass === null) return "/onboarding/class";
-  return "/onboarding/invite";
+  return "/teacher";
 }
 
 /**
@@ -238,12 +262,32 @@ export function requireTeachingType(teacher: TeacherContext): OfferedCourseType 
   return teacher.teachingType;
 }
 
-/** Step 4 requires the class from step 3 — and, transitively, step 2. */
-export function requireClass(teacher: TeacherContext): OnboardingClass {
+/**
+ * Step 4 requires the class from step 3 — and, transitively, step 2.
+ *
+ * It also requires that class to be the teacher's *only* one, which is the
+ * whole difference between the wizard's last step and class management. Step 4
+ * has no `[classId]` segment: it says "Class created!" about `currentClass`,
+ * the newest row, because when it was written that was the only row there could
+ * be. A teacher with several classes asking for this URL is asking about a
+ * class this page cannot name, so they go to the list and pick one — where
+ * `/teacher/[classId]` offers the same invitation link and the same invite-by-
+ * email form, for the class they actually chose.
+ *
+ * This is a navigation guard, not an authorisation one. Nothing here decides
+ * what may be read: `currentClass` was loaded under `classes_teacher_all` for
+ * the authenticated user, so it is already the caller's own class, and the
+ * redirect only decides which of two pages is the right one to show it on.
+ */
+export function requireFirstClass(teacher: TeacherContext): OnboardingClass {
   requireTeachingType(teacher);
 
   if (teacher.currentClass === null) {
     redirect("/onboarding/class");
+  }
+
+  if (teacher.hasMultipleClasses) {
+    redirect("/teacher");
   }
 
   return teacher.currentClass;

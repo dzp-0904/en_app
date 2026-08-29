@@ -13,7 +13,7 @@ import {
 import { invitationEmail } from "@/lib/mail/invitation-email";
 import { MailNotConfiguredError, sendMail } from "@/lib/mail/mailer";
 import { requireTeacher } from "@/lib/onboarding";
-import { isClassId } from "@/lib/teacher";
+import { isClassId, loadEditableClass, loadInviteCode } from "@/lib/teacher";
 import { joinUrl } from "@/lib/site-url";
 import { createClient } from "@/lib/supabase/server";
 
@@ -434,7 +434,32 @@ export async function updateClass(classId: string, formData: FormData) {
 }
 
 /**
- * Step 4 — invite one student by email.
+ * Which page rendered the invitation form.
+ *
+ * Not a path. A Server Function is a POST endpoint, so the destination it
+ * redirects to must never be something a submission can state, and the safest
+ * way to guarantee that is for no destination to cross the wire at all — the
+ * action builds both from `classId` itself. This discriminator only picks
+ * which of the two it builds.
+ */
+type InviteOrigin = "onboarding" | "class";
+
+/**
+ * Invite one student by email, to one named class.
+ *
+ * Used by the wizard's last step and by `/teacher/[classId]`, which is the point
+ * of the change: this used to read `teacher.currentClass` — the teacher's most
+ * recent class — so it could only ever invite into whichever class was newest,
+ * and a teacher wanting to add a student to an older one had no way to say so.
+ * The class is now named by the caller and checked against the caller's
+ * identity, exactly as `updateClass` does it.
+ *
+ * `classId` is a bound argument, not a form field, and it is not what authorises
+ * anything. `loadEditableClass` re-reads the class filtered by
+ * `teacher_id = <authenticated user>`, so a class belonging to somebody else is
+ * indistinguishable from one that does not exist, and beneath that
+ * `class_invite_codes_teacher_all` refuses to hand out a code for a class that
+ * is not in `app.my_class_ids()`. The URL selects a row; it does not grant one.
  *
  * Order matters. The roster row is written first and the message is sent second,
  * because the row is what actually grants the invitation: `join_class_with_code`
@@ -443,50 +468,66 @@ export async function updateClass(classId: string, formData: FormData) {
  * and failing to record would produce the opposite — a promise with nothing
  * behind it.
  *
- * If the send fails the row is deliberately kept, and the invite page reports
- * that the invitation is saved but the email did not go out. `invite_email_sent_at`
- * is stamped only on a confirmed send, so the UI never claims delivery that did
- * not happen.
+ * If the send fails the row is deliberately kept, and the page reports that the
+ * invitation is saved but the email did not go out. `invite_email_sent_at` is
+ * stamped only on a confirmed send, so the UI never claims delivery that did not
+ * happen.
  */
-export async function inviteStudentByEmail(formData: FormData) {
+export async function inviteStudentByEmail(
+  classId: string,
+  origin: InviteOrigin,
+  formData: FormData,
+) {
   const teacher = await requireTeacher();
 
-  if (!teacher.currentClass) {
-    redirect(CLASS_STEP);
+  if (!isClassId(classId)) {
+    notFound();
   }
+
+  // Built from the bound segment and a two-valued discriminator, never from the
+  // submission. See `InviteOrigin`.
+  const formPath =
+    origin === "onboarding" ? INVITE_STEP : `/teacher/${classId}`;
 
   const email = String(formData.get("email") ?? "")
     .trim()
     .toLowerCase();
 
   if (!email) {
-    failTo(INVITE_STEP, "Enter a student's email address.");
+    failTo(formPath, "Enter a student's email address.");
   }
 
   // Deliberately loose: one @, no spaces, a dot in the domain. Anything
   // stricter rejects addresses that are valid, and the real test is whether the
   // student can confirm the address at sign-up.
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
-    failTo(INVITE_STEP, "That does not look like an email address.");
+    failTo(formPath, "That does not look like an email address.");
   }
 
   const supabase = await createClient();
-  const classId = teacher.currentClass.id;
 
-  const { data: invite, error: inviteError } = await supabase
-    .from("class_invite_codes")
-    .select("code")
-    .eq("class_id", classId)
-    .eq("is_active", true)
-    .is("revoked_at", null)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // The ownership check, and where the class name in the email comes from. The
+  // same loader the edit page uses, so there is one answer to "may this teacher
+  // touch this class" rather than one per feature.
+  const owned = await loadEditableClass(supabase, teacher.userId, classId);
 
-  if (inviteError || !invite) {
-    logDbError("class_invite_codes.select", inviteError ?? {});
+  if (owned.kind === "not-found") {
+    notFound();
+  }
+
+  if (owned.kind === "error") {
+    // A failed read is not "no such class": telling a teacher their class is
+    // gone when the database stumbled is the worse of the two answers.
+    failTo(formPath, "We could not load this class. Please try again.");
+  }
+
+  // The same four rules `/join/[code]` will apply to whatever we send. A code
+  // that is active but expired or exhausted is not a link worth emailing.
+  const code = await loadInviteCode(supabase, classId);
+
+  if (!code) {
     failTo(
-      INVITE_STEP,
+      formPath,
       "This class has no active invitation link, so we cannot invite anyone yet.",
     );
   }
@@ -504,11 +545,11 @@ export async function inviteStudentByEmail(formData: FormData) {
 
   if (existingError) {
     logDbError("class_members.select", existingError);
-    failTo(INVITE_STEP, "We could not check the class list. Please try again.");
+    failTo(formPath, "We could not check the class list. Please try again.");
   }
 
   if (existing?.join_status === "joined") {
-    failTo(INVITE_STEP, "That student has already joined this class.");
+    failTo(formPath, "That student has already joined this class.");
   }
 
   let memberId = existing?.id ?? null;
@@ -530,7 +571,7 @@ export async function inviteStudentByEmail(formData: FormData) {
     if (insertError && insertError.code !== "23505") {
       logDbError("class_members.insert", insertError);
       failTo(
-        INVITE_STEP,
+        formPath,
         "We could not add that student to the class. Please try again.",
       );
     }
@@ -538,12 +579,12 @@ export async function inviteStudentByEmail(formData: FormData) {
     memberId = inserted?.id ?? null;
   }
 
-  const url = await joinUrl(invite.code);
+  const url = await joinUrl(code);
 
   try {
     await sendMail(
       invitationEmail(email, {
-        className: teacher.currentClass.name,
+        className: owned.fields.className,
         teacherName: teacher.fullName,
         joinUrl: url,
       }),
@@ -561,9 +602,9 @@ export async function inviteStudentByEmail(formData: FormData) {
             : "unknown",
     });
 
-    revalidatePath("/onboarding", "layout");
+    revalidateFor(origin);
     failTo(
-      INVITE_STEP,
+      formPath,
       `${email} was added to the class, but we could not send the email. Share the invitation link with them instead.`,
     );
   }
@@ -581,8 +622,20 @@ export async function inviteStudentByEmail(formData: FormData) {
     }
   }
 
-  // No success parameter: the invitation list on the step is read back from
+  // No success parameter: the invitation list on both pages is read back from
   // class_members, so it is the confirmation, and it stays correct on a reload.
-  revalidatePath("/onboarding", "layout");
-  redirect(INVITE_STEP);
+  revalidateFor(origin);
+  redirect(formPath);
+}
+
+/**
+ * Drops the cached render of whichever tree the invitation form lives in.
+ *
+ * Both pages are rendered per request, but the client router caches them across
+ * the redirect, so without this the teacher is returned to a page still listing
+ * the invitations it had before theirs. `/teacher` is invalidated as a layout
+ * because the class list shows a pending count that has just changed too.
+ */
+function revalidateFor(origin: InviteOrigin): void {
+  revalidatePath(origin === "onboarding" ? "/onboarding" : "/teacher", "layout");
 }

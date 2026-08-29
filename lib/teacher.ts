@@ -342,8 +342,16 @@ export async function loadTeacherClass(
  * PostgREST filters compare a column to a literal, not to another column.
  * Expiry could be sent as a filter, but is kept alongside it so all four rules
  * read as one list.
+ *
+ * Exported because two other callers were asking `class_invite_codes` the same
+ * question with only half the rules — `is_active` and `revoked_at`, no expiry
+ * and no exhaustion. `class_invite_codes.expires_at` defaults to thirty days
+ * out, so that gap is reached by simply waiting: `/onboarding/invite` would
+ * print a dead link, and `inviteStudentByEmail` would email one, both while
+ * `/join/[code]` correctly refused it. One implementation is the fix; a second
+ * copy of four conditions is how they diverged in the first place.
  */
-async function loadInviteCode(
+export async function loadInviteCode(
   supabase: Awaited<ReturnType<typeof createClient>>,
   classId: string,
 ): Promise<string | null> {
