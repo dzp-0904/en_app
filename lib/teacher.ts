@@ -133,6 +133,71 @@ export type ClassSession = {
   status: "scheduled" | "completed" | "cancelled";
 };
 
+export type ClassSessionResult =
+  | { kind: "ok"; session: ClassSession }
+  | { kind: "not-found" }
+  | { kind: "error" };
+
+/**
+ * `public.attendance_status`, in full.
+ *
+ * All four values, because all four are already modelled and the difference
+ * between them is load-bearing rather than decorative:
+ * `v_member_session_attendance` counts `present` and `late` in the numerator,
+ * `absent` in the denominator only, and drops an `excused` session from both.
+ * Offering a teacher only two of them would make the one status that can
+ * legitimately excuse a student from the denominator unreachable from the
+ * application, and no other screen can set it.
+ *
+ * The order is the order they are offered in, most to least common.
+ */
+export const ATTENDANCE_STATUSES = [
+  "present",
+  "late",
+  "absent",
+  "excused",
+] as const;
+
+export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
+
+/** What each status is called on screen. */
+export const ATTENDANCE_LABELS: Record<AttendanceStatus, string> = {
+  present: "Present",
+  late: "Late",
+  absent: "Absent",
+  excused: "Excused",
+};
+
+/**
+ * Whether a submitted value is one of the enum's four.
+ *
+ * The allow-list, not a cast. Postgres would reject anything else with
+ * `22P02 invalid input value for enum`, which is a database error standing in
+ * for what is really a malformed request, and one whose text should not reach a
+ * user. Rejecting it here keeps the failure in the application's own vocabulary.
+ */
+export function isAttendanceStatus(value: string): value is AttendanceStatus {
+  return (ATTENDANCE_STATUSES as readonly string[]).includes(value);
+}
+
+/**
+ * One active student on a session's attendance list, with whatever was recorded
+ * for them at that session.
+ *
+ * `attendance` is null when no `session_attendance` row exists for the pair, and
+ * that is a real state rather than a missing one: rows appear only when a
+ * teacher records something, and `v_member_session_attendance` deliberately
+ * counts an unmarked session against a student so the gap stays visible. Nothing
+ * is manufactured to fill it — the page says "Not recorded".
+ */
+export type SessionAttendee = {
+  /** class_members.id — what `session_attendance.class_member_id` refers to. */
+  membershipId: string;
+  name: string | null;
+  email: string | null;
+  attendance: AttendanceStatus | null;
+};
+
 /** `classes.id` and `class_members.id` are uuid columns. */
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -152,6 +217,9 @@ export function isUuid(value: string): boolean {
 /** The columns every class view needs, in one place so the two agree. */
 const CLASS_COLUMNS =
   "id, name, course_type, course_type_other, target_band, start_date, end_date, schedule_note, timezone";
+
+/** The columns every session view needs, in one place so the two agree. */
+const SESSION_COLUMNS = "id, starts_at, ends_at, title, status";
 
 /** Roster statuses that describe a present person. See `RosterEntry`. */
 const PRESENT: ("joined" | "invited")[] = ["joined", "invited"];
@@ -437,7 +505,7 @@ export async function loadClassSessions(
 ): Promise<ClassSession[] | null> {
   const { data, error } = await supabase
     .from("class_sessions")
-    .select("id, starts_at, ends_at, title, status")
+    .select(SESSION_COLUMNS)
     .eq("class_id", classId)
     // Chronological, which is also what the `(class_id, starts_at)` unique
     // constraint's index already orders — the schema's own note in
@@ -455,5 +523,129 @@ export async function loadClassSessions(
     endsAt: row.ends_at,
     title: row.title,
     status: row.status,
+  }));
+}
+
+/**
+ * One lesson of one class — selected by both ids at once.
+ *
+ * The two filters are the authorisation, and they are both in the WHERE clause
+ * on purpose. Fetching the session by `id` alone and then comparing its
+ * `class_id` in TypeScript would read another teacher's row into this process
+ * before deciding not to show it, and every such comparison is one `!==` away
+ * from being wrong. Here a session id from a class other than `classId` simply
+ * matches nothing, so "not yours" and "does not exist" are the same event
+ * rather than two branches that have to be kept saying the same thing.
+ *
+ * Callers reach here only after `loadEditableClass` has proved `classId` is
+ * theirs, so `class_id = classId` is what carries ownership down to the session.
+ * Underneath, `class_sessions_teacher_all` admits only `app.my_class_ids()`.
+ *
+ * The three arms mean what they mean everywhere else in this module: a failed
+ * query is `error`, never `not-found`.
+ */
+export async function loadClassSession(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+  sessionId: string,
+): Promise<ClassSessionResult> {
+  // Before the round trip, so a mistyped link is a 404 rather than `22P02
+  // invalid input syntax for type uuid` arriving as a server fault.
+  if (!UUID.test(classId) || !UUID.test(sessionId)) return { kind: "not-found" };
+
+  const { data: found, error } = await supabase
+    .from("class_sessions")
+    .select(SESSION_COLUMNS)
+    .eq("id", sessionId)
+    .eq("class_id", classId)
+    .maybeSingle();
+
+  if (error) {
+    logDbError("class_sessions.select(one)", error);
+    return { kind: "error" };
+  }
+
+  if (!found) return { kind: "not-found" };
+
+  return {
+    kind: "ok",
+    session: {
+      sessionId: found.id,
+      startsAt: found.starts_at,
+      endsAt: found.ends_at,
+      title: found.title,
+      status: found.status,
+    },
+  };
+}
+
+/**
+ * The class's active students, each with whatever attendance this session has
+ * recorded for them.
+ *
+ * Two queries rather than one embedded join, for the reason the class counts
+ * are two queries: PostgREST's filters on an embedded relation turn the embed
+ * into an inner join unless coaxed, and this needs the opposite — every active
+ * member appears, with or without a row. Two plain statements say that plainly.
+ * It is not an N+1: neither query is per student.
+ *
+ * `join_status = 'joined'` and `removed_at is null` are what "active" means, and
+ * they agree with the rest of the system rather than inventing a third rule.
+ * `app.my_student_class_ids()` uses exactly this pair to decide whether a class
+ * is still open to a student, and `v_member_session_attendance` requires
+ * `joined_at is not null` for the same reason: an unclaimed invitation is not
+ * somebody who can have been in the room. A removed member disappears from this
+ * list, while every `session_attendance` row ever recorded against them stays
+ * exactly where it is — nothing here writes, and nothing here deletes.
+ *
+ * `null` means a query failed, `[]` means the class has no active students.
+ */
+export async function loadSessionAttendance(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+  sessionId: string,
+): Promise<SessionAttendee[] | null> {
+  const { data: members, error: rosterError } = await supabase
+    .from("class_members")
+    .select(
+      "id, invited_name, profiles!class_members_student_id_fkey(full_name, email)",
+    )
+    .eq("class_id", classId)
+    .eq("join_status", "joined")
+    .is("removed_at", null)
+    // The order the class page already lists students in.
+    .order("created_at", { ascending: true });
+
+  if (rosterError) {
+    logDbError("class_members.select(attendance)", rosterError);
+    return null;
+  }
+
+  if (!members || members.length === 0) return [];
+
+  // Scoped to the session AND the class. The composite foreign key
+  // `(session_id, class_id)` already makes a row that disagrees impossible to
+  // store, so this filter is the query saying the same thing the schema does.
+  const { data: marks, error: markError } = await supabase
+    .from("session_attendance")
+    .select("class_member_id, status")
+    .eq("session_id", sessionId)
+    .eq("class_id", classId);
+
+  if (markError) {
+    logDbError("session_attendance.select", markError);
+    return null;
+  }
+
+  const recorded = new Map<string, AttendanceStatus>();
+  for (const mark of marks ?? []) recorded.set(mark.class_member_id, mark.status);
+
+  return members.map((member) => ({
+    membershipId: member.id,
+    // The profile wins over the name the teacher typed, as on the roster.
+    name: member.profiles?.full_name ?? member.invited_name,
+    email: member.profiles?.email ?? null,
+    // Absent from the map means unmarked, which is not the same as `absent`.
+    attendance: recorded.get(member.id) ?? null,
   }));
 }

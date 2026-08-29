@@ -252,6 +252,7 @@ export default async function TeacherClassPage({
               <Card>
                 <Lesson
                   session={session}
+                  classId={detail.classId}
                   timezone={detail.timezone}
                   ordinal={index + 1}
                 />
@@ -387,10 +388,12 @@ export default async function TeacherClassPage({
  */
 function Lesson({
   session,
+  classId,
   timezone,
   ordinal,
 }: {
   session: ClassSession;
+  classId: string;
   timezone: string;
   ordinal: number;
 }) {
@@ -417,6 +420,15 @@ function Lesson({
           {session.status === "cancelled" ? "Cancelled" : "Completed"}
         </p>
       )}
+
+      {/* The same pairing the class list uses for "Open class": one card, one
+          way in. The link carries both segments, and the page behind it proves
+          both — the session id alone does not select the lesson. */}
+      <Button asChild variant="outline" size="sm" className="mt-4">
+        <Link href={`/teacher/${classId}/sessions/${session.sessionId}`}>
+          Open lesson
+        </Link>
+      </Button>
     </>
   );
 }

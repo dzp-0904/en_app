@@ -7,7 +7,9 @@ import { inviteStudentByEmail } from "@/app/onboarding/actions";
 import { requireTeacher } from "@/lib/onboarding";
 import { createClient } from "@/lib/supabase/server";
 import {
+  isAttendanceStatus,
   isUuid,
+  loadClassSession,
   loadEditableClass,
   type TeacherClassFields,
 } from "@/lib/teacher";
@@ -83,13 +85,16 @@ function logDbError(
  * caller from the bound segment. Nothing submitted can name a destination.
  *
  * The class's own columns come back with the decision, so callers that need one
- * — `createSession` needs `timezone` — do not pay for a second lookup.
+ * — `createSession` needs `timezone` — do not pay for a second lookup. So does
+ * the teacher's id, which `recordAttendance` stamps into `recorded_by`: it comes
+ * from here, where it was derived from the cookie, and never from a form.
  */
 async function authoriseClass(
   classId: string,
   failPath: string,
 ): Promise<{
   supabase: Awaited<ReturnType<typeof createClient>>;
+  teacherId: string;
   fields: TeacherClassFields;
 }> {
   const teacher = await requireTeacher();
@@ -115,7 +120,7 @@ async function authoriseClass(
     failTo(failPath, "We could not load this class. Please try again.");
   }
 
-  return { supabase, fields: owned.fields };
+  return { supabase, teacherId: teacher.userId, fields: owned.fields };
 }
 
 /**
@@ -414,4 +419,144 @@ export async function createSession(classId: string, formData: FormData) {
   // layout, both cached by the client router across the redirect.
   revalidatePath("/teacher", "layout");
   redirect(`/teacher/${classId}`);
+}
+
+/**
+ * The class gate, plus the session that must sit inside it.
+ *
+ * The second half of the chain the milestone requires: authenticated teacher →
+ * owned class → session *in that class*. `loadClassSession` puts both
+ * `id = sessionId` and `class_id = classId` in the WHERE clause, so a session id
+ * belonging to another class — another teacher's or this teacher's own other
+ * class — matches no row and is reported as a session that does not exist. The
+ * session id is never the thing that selects the row on its own.
+ *
+ * Ownership of the class is settled first, so a forged pair learns nothing from
+ * which of the two ids was wrong: both orders of mistake end in the same 404.
+ */
+async function authoriseSession(
+  classId: string,
+  sessionId: string,
+): Promise<{
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  teacherId: string;
+  sessionPath: string;
+}> {
+  const classPath = `/teacher/${classId}`;
+  const { supabase, teacherId } = await authoriseClass(classId, classPath);
+
+  const found = await loadClassSession(supabase, classId, sessionId);
+
+  if (found.kind === "not-found") {
+    notFound();
+  }
+
+  if (found.kind === "error") {
+    // A failed read is not "no such lesson". Back to the class, which is known
+    // to exist and is known to be this teacher's.
+    failTo(classPath, "We could not load this lesson. Please try again.");
+  }
+
+  // Built from two segments that have now both been proved. Nothing submitted
+  // names a destination.
+  return {
+    supabase,
+    teacherId,
+    sessionPath: `/teacher/${classId}/sessions/${sessionId}`,
+  };
+}
+
+/**
+ * Marks one student present, late, absent or excused at one session.
+ *
+ * The whole chain is re-established here, in order, on every call:
+ *
+ *   authenticated user → teacher → owned class → session in that class
+ *     → active member of that class → attendance for that (session, member)
+ *
+ * Three of the four arguments are bound segments and none of them is trusted:
+ * `authoriseSession` turns the first two into an ownership decision, and the
+ * membership is then re-read filtered by `class_id` and by being active, so an
+ * id naming somebody else's student matches nothing. The fourth, `status`, is
+ * the only value that comes off the form, and it is checked against
+ * `public.attendance_status`'s four values before it is used. There is no
+ * teacher id, no ownership flag and no redirect target anywhere in the request.
+ *
+ * Beneath all of it the schema says the same thing twice more:
+ * `session_attendance_teacher_all` admits only `app.my_class_ids()`, and both
+ * composite foreign keys carry `class_id`, so a member of one class physically
+ * cannot be attached to another class's session — the migration's own note.
+ *
+ * The write is an upsert on `session_attendance_session_member_key`
+ * `(session_id, class_member_id)`, which is the constraint the migration says
+ * exists to make "roster marking an upsert". Changing a mark is therefore the
+ * same statement as making one, resolved by the database in one round trip: no
+ * read-then-insert, no duplicate row, and no race between two teachers marking
+ * the same student.
+ */
+export async function recordAttendance(
+  classId: string,
+  sessionId: string,
+  membershipId: string,
+  formData: FormData,
+) {
+  const { supabase, teacherId, sessionPath } = await authoriseSession(
+    classId,
+    sessionId,
+  );
+
+  if (!isUuid(membershipId)) {
+    failTo(sessionPath, "That student is no longer on this class list.");
+  }
+
+  const status = readText(formData, "status");
+
+  if (!isAttendanceStatus(status)) {
+    failTo(sessionPath, "Please choose one of the attendance options.");
+  }
+
+  // Steps 8 and 9 of the chain: the membership is this class's, and it is
+  // active. The composite foreign key already refuses a member from another
+  // class, but it knows nothing about `removed_at` — a removed student's
+  // history is kept, and this is what stops a new mark being added to it.
+  const { data: member, error: memberError } = await supabase
+    .from("class_members")
+    .select("id")
+    .eq("id", membershipId)
+    .eq("class_id", classId)
+    .eq("join_status", "joined")
+    .is("removed_at", null)
+    .maybeSingle();
+
+  if (memberError) {
+    logDbError("class_members.select(active)", memberError);
+    failTo(sessionPath, "We could not save this attendance. Please try again.");
+  }
+
+  if (!member) {
+    failTo(sessionPath, "That student is no longer on this class list.");
+  }
+
+  const { error } = await supabase.from("session_attendance").upsert(
+    {
+      session_id: sessionId,
+      class_member_id: membershipId,
+      // Denormalised on the row and load-bearing: it is half of both composite
+      // foreign keys. It is the proved segment, never a submitted value.
+      class_id: classId,
+      status,
+      // Who marked it, from the session cookie. `note` is deliberately absent
+      // from this list so that changing a mark leaves any existing note alone.
+      recorded_by: teacherId,
+    },
+    { onConflict: "session_id,class_member_id" },
+  );
+
+  if (error) {
+    logDbError("session_attendance.upsert", error);
+    failTo(sessionPath, "We could not save this attendance. Please try again.");
+  }
+
+  revalidatePath(sessionPath);
+  redirect(sessionPath);
 }
