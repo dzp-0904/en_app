@@ -3,10 +3,23 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { SubmitButton } from "@/components/auth/submit-button";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { ATTENDANCE_LABELS, ATTENDANCE_STATUSES } from "@/lib/attendance";
+import {
+  NOTE_MAX_LENGTH,
+  PERFORMANCE_LABELS,
+  PERFORMANCE_LEVELS,
+  SKILL_LABELS,
+  SKILLS,
+  TOPIC_MAX_LENGTH,
+} from "@/lib/lesson-log";
 import { requireTeacher } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
 import { createClient } from "@/lib/supabase/server";
@@ -14,11 +27,13 @@ import {
   loadClassSession,
   loadEditableClass,
   loadSessionAttendance,
+  loadSessionLessonNotes,
+  type LessonNote,
   type SessionAttendee,
 } from "@/lib/teacher";
 import { formatZonedDate, formatZonedTime } from "@/lib/time";
 
-import { recordAttendance } from "../../actions";
+import { createLessonLog, recordAttendance } from "../../actions";
 
 export const metadata: Metadata = {
   title: "Lesson",
@@ -38,8 +53,9 @@ export const metadata: Metadata = {
  * `sessions` is a static segment, so `[sessionId]` can never swallow it, and
  * both loaders refuse anything that is not a uuid before making a round trip.
  *
- * Four reads: the class, the session, the active members, the marks for this
- * session. None of them is per student.
+ * Five reads: the class, the session, the active members, the marks for this
+ * session, and this session's lesson notes. None of them is per student, and
+ * the last two are one statement each however many rows they return.
  */
 export default async function SessionPage({
   params,
@@ -94,7 +110,12 @@ export default async function SessionPage({
   // attendance list and nothing else — the lesson's own facts still render.
   // `null` is that failure and is deliberately not `[]`: "no students are
   // enrolled" is a claim this page may only make on an answer it actually got.
-  const attendees = await loadSessionAttendance(supabase, classId, sessionId);
+  // The notes answer to nothing the roster says, so the two go out together
+  // rather than one waiting on the other.
+  const [attendees, notes] = await Promise.all([
+    loadSessionAttendance(supabase, classId, sessionId),
+    loadSessionLessonNotes(supabase, classId, sessionId),
+  ]);
 
   const query = await searchParams;
   const error = typeof query.error === "string" ? query.error : undefined;
@@ -159,7 +180,192 @@ export default async function SessionPage({
           ))}
         </ul>
       )}
+
+      <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        Lesson notes
+      </h2>
+
+      {notes === null ? (
+        <Alert>
+          We couldn&apos;t load this lesson&apos;s notes just now. Please refresh
+          the page.
+        </Alert>
+      ) : notes.length === 0 ? (
+        <Card>
+          <p className="text-sm text-muted-foreground">
+            No notes have been added yet.
+          </p>
+        </Card>
+      ) : (
+        <ul className="space-y-3">
+          {notes.map((note) => (
+            <li key={note.noteId}>
+              <Card>
+                <Note note={note} />
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* A note names a student, so there is nothing to write until the class
+          has one. The attendance block above has already said why. */}
+      {attendees && attendees.length > 0 ? (
+        <Card className="mt-3">
+          <NoteForm
+            attendees={attendees}
+            classId={classId}
+            sessionId={sessionId}
+          />
+        </Card>
+      ) : null}
     </Frame>
+  );
+}
+
+/**
+ * One note as it was written.
+ *
+ * The topic leads because it is what the note is about; the student, the skill
+ * and how they did are the three enum-shaped facts beside it; the note itself is
+ * the body. The lesson's date is not repeated — every note on this page carries
+ * the same one, and it is already in the header.
+ *
+ * `whitespace-pre-line` keeps the teacher's paragraph breaks. React escapes the
+ * text, so nothing typed into the field can become markup.
+ */
+function Note({ note }: { note: LessonNote }) {
+  return (
+    <>
+      {/* `break-words` because both of these are free text: a 300-character
+          topic with no spaces in it would otherwise widen the whole page. */}
+      <h3 className="font-semibold break-words text-foreground">{note.topic}</h3>
+
+      <p className="mt-1 text-sm text-muted-foreground">
+        {note.studentName ?? "Unnamed student"} · {SKILL_LABELS[note.skill]} ·{" "}
+        {PERFORMANCE_LABELS[note.performance]}
+      </p>
+
+      {note.note ? (
+        <p className="mt-3 text-sm break-words whitespace-pre-line text-foreground">
+          {note.note}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The form that writes one.
+ *
+ * Four fields rather than one, because `lesson_logs` is a per-student
+ * observation and its NOT NULL columns say so: a row cannot exist without a
+ * `class_member_id`, a `skill`, a `topic` and a `performance`. The milestone's
+ * wording describes a single memo; the schema is what this follows.
+ *
+ * `lesson_date` and `created_by` are not here at all. Both are derived on the
+ * server — the lesson's own start read on the class's clock, and the teacher in
+ * the session cookie — because a field the browser could set is a field the
+ * browser could lie about.
+ *
+ * The student and the performance start unselected. A `<select>` always has a
+ * selection, so defaulting either would file a note against whoever happened to
+ * be first on the roster, or record a judgement the teacher never made; an empty
+ * `required` option makes the browser ask instead. The skill defaults to
+ * `general`, which is the enum's own value for "not one skill in particular".
+ *
+ * Two ids are bound on the server and neither is trusted there; `maxLength` here
+ * is a courtesy that stops the field over-filling, and the action checks both
+ * lengths again against the schema's constraint and the application's cap.
+ */
+function NoteForm({
+  attendees,
+  classId,
+  sessionId,
+}: {
+  attendees: SessionAttendee[];
+  classId: string;
+  sessionId: string;
+}) {
+  return (
+    <form
+      action={createLessonLog.bind(null, classId, sessionId)}
+      className="space-y-4"
+    >
+      <div className="space-y-1.5">
+        <Label htmlFor="class_member_id">Student</Label>
+        <Select
+          id="class_member_id"
+          name="class_member_id"
+          defaultValue=""
+          required
+        >
+          <option value="" disabled>
+            Choose a student
+          </option>
+          {attendees.map((attendee) => (
+            <option key={attendee.membershipId} value={attendee.membershipId}>
+              {attendee.name ?? attendee.email ?? "Unnamed student"}
+            </option>
+          ))}
+        </Select>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="topic">Topic</Label>
+        <Input
+          id="topic"
+          name="topic"
+          type="text"
+          maxLength={TOPIC_MAX_LENGTH}
+          placeholder="What this lesson covered"
+          required
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="skill">Skill</Label>
+          <Select id="skill" name="skill" defaultValue="general" required>
+            {SKILLS.map((skill) => (
+              <option key={skill} value={skill}>
+                {SKILL_LABELS[skill]}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="performance">Performance</Label>
+          <Select id="performance" name="performance" defaultValue="" required>
+            <option value="" disabled>
+              Choose
+            </option>
+            {PERFORMANCE_LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {PERFORMANCE_LABELS[level]}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="note">Lesson notes</Label>
+        <Textarea
+          id="note"
+          name="note"
+          rows={4}
+          maxLength={NOTE_MAX_LENGTH}
+          placeholder="How the lesson went for this student"
+          required
+        />
+      </div>
+
+      <SubmitButton pendingLabel="Adding note…" className="mt-6 w-full">
+        Add note
+      </SubmitButton>
+    </form>
   );
 }
 

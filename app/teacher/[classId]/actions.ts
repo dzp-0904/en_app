@@ -5,15 +5,22 @@ import { notFound, redirect } from "next/navigation";
 
 import { inviteStudentByEmail } from "@/app/onboarding/actions";
 import { isAttendanceStatus } from "@/lib/attendance";
+import {
+  isPerformance,
+  isSkill,
+  NOTE_MAX_LENGTH,
+  TOPIC_MAX_LENGTH,
+} from "@/lib/lesson-log";
 import { requireTeacher } from "@/lib/onboarding";
 import { createClient } from "@/lib/supabase/server";
 import {
   isUuid,
   loadClassSession,
   loadEditableClass,
+  type ClassSession,
   type TeacherClassFields,
 } from "@/lib/teacher";
-import { instantOf } from "@/lib/time";
+import { instantOf, zonedCalendarDate } from "@/lib/time";
 
 /**
  * Everything a teacher does to one class from its own page: manage the roster —
@@ -433,6 +440,11 @@ export async function createSession(classId: string, formData: FormData) {
  *
  * Ownership of the class is settled first, so a forged pair learns nothing from
  * which of the two ids was wrong: both orders of mistake end in the same 404.
+ *
+ * The session and the class's timezone come back with it because they were both
+ * read to get here. A caller that needs the lesson's own date — `createLessonLog`
+ * does — must not go and fetch it again, and must certainly not accept one from
+ * the form.
  */
 async function authoriseSession(
   classId: string,
@@ -440,10 +452,15 @@ async function authoriseSession(
 ): Promise<{
   supabase: Awaited<ReturnType<typeof createClient>>;
   teacherId: string;
+  session: ClassSession;
+  timezone: string;
   sessionPath: string;
 }> {
   const classPath = `/teacher/${classId}`;
-  const { supabase, teacherId } = await authoriseClass(classId, classPath);
+  const { supabase, teacherId, fields } = await authoriseClass(
+    classId,
+    classPath,
+  );
 
   const found = await loadClassSession(supabase, classId, sessionId);
 
@@ -462,6 +479,8 @@ async function authoriseSession(
   return {
     supabase,
     teacherId,
+    session: found.session,
+    timezone: fields.timezone,
     sessionPath: `/teacher/${classId}/sessions/${sessionId}`,
   };
 }
@@ -555,6 +574,142 @@ export async function recordAttendance(
   if (error) {
     logDbError("session_attendance.upsert", error);
     failTo(sessionPath, "We could not save this attendance. Please try again.");
+  }
+
+  revalidatePath(sessionPath);
+  redirect(sessionPath);
+}
+
+/**
+ * Writes one lesson note against one student at one session.
+ *
+ * The chain is the same one `recordAttendance` establishes, in the same order,
+ * on every call:
+ *
+ *   authenticated user → teacher → owned class → session in that class
+ *     → active member of that class → lesson log for that (session, member)
+ *
+ * `lesson_logs` is not what the milestone's wording suggests, and the schema
+ * wins. It is a per-student observation, not a per-lesson memo: `class_member_id`
+ * is NOT NULL and so are `skill`, `topic`, `performance` and `lesson_date`, while
+ * `session_id` is the nullable column and `note` is the only free text. A row
+ * therefore cannot be written without naming a student and saying something
+ * about their work, which is why the form collects four fields rather than one.
+ *
+ * Three of those four are checked against the database's own vocabulary before
+ * they are used: `skill` and `performance` against their enums, `topic` against
+ * `lesson_logs_topic_length`'s 1–300. The fourth, `note`, has no constraint in
+ * the schema, so its cap is the application's — see `lib/lesson-log.ts`. Nothing
+ * is truncated: over-long input is refused with the text still in the browser.
+ *
+ * Nothing that decides anything comes off the form. `class_id` is the proved
+ * segment, `created_by` is the session cookie's teacher, and `lesson_date` is
+ * computed from the session's own `starts_at` on the class's clock — so a lesson
+ * that starts after midnight local time is filed under the day it was taught
+ * rather than the day UTC happened to be having. The redirect is built from two
+ * segments that have already been proved.
+ *
+ * There is no upsert here and no unique constraint to upsert against: the table
+ * has neither, which is the schema saying a session may carry many notes. A
+ * second note is a second row, and no existing one is touched.
+ */
+export async function createLessonLog(
+  classId: string,
+  sessionId: string,
+  formData: FormData,
+) {
+  const { supabase, teacherId, session, timezone, sessionPath } =
+    await authoriseSession(classId, sessionId);
+
+  const membershipId = readText(formData, "class_member_id");
+
+  if (!isUuid(membershipId)) {
+    failTo(sessionPath, "Please choose which student this note is about.");
+  }
+
+  const skill = readText(formData, "skill");
+
+  if (!isSkill(skill)) {
+    failTo(sessionPath, "Please choose one of the skills.");
+  }
+
+  const performance = readText(formData, "performance");
+
+  if (!isPerformance(performance)) {
+    failTo(sessionPath, "Please choose how the student did.");
+  }
+
+  // `readText` has already trimmed, which is what the CHECK measures: it is
+  // `length(btrim(topic))`, so a topic of spaces is empty to the database too.
+  const topic = readText(formData, "topic");
+
+  if (topic.length === 0) {
+    failTo(sessionPath, "Please say what this lesson covered.");
+  }
+
+  if (topic.length > TOPIC_MAX_LENGTH) {
+    failTo(
+      sessionPath,
+      `Please keep the topic to ${TOPIC_MAX_LENGTH} characters or fewer.`,
+    );
+  }
+
+  const note = readText(formData, "note");
+
+  if (note.length === 0) {
+    failTo(sessionPath, "Please write a note before adding it.");
+  }
+
+  if (note.length > NOTE_MAX_LENGTH) {
+    failTo(
+      sessionPath,
+      `Please keep the note to ${NOTE_MAX_LENGTH} characters or fewer.`,
+    );
+  }
+
+  // The membership is this class's, and it is active — the same pair of facts
+  // `recordAttendance` re-establishes, for the same reasons. The composite
+  // foreign key `(class_member_id, class_id)` already refuses a member from
+  // another class; it knows nothing about `removed_at`.
+  const { data: member, error: memberError } = await supabase
+    .from("class_members")
+    .select("id")
+    .eq("id", membershipId)
+    .eq("class_id", classId)
+    .eq("join_status", "joined")
+    .is("removed_at", null)
+    .maybeSingle();
+
+  if (memberError) {
+    logDbError("class_members.select(lesson log)", memberError);
+    failTo(sessionPath, "We could not save this note. Please try again.");
+  }
+
+  if (!member) {
+    failTo(sessionPath, "That student is no longer on this class list.");
+  }
+
+  const { error } = await supabase.from("lesson_logs").insert({
+    session_id: sessionId,
+    class_member_id: membershipId,
+    // Half of both composite foreign keys, and the proved segment rather than a
+    // submitted value.
+    class_id: classId,
+    // The day the lesson happened on, read on the class's clock. Never the
+    // server's date, and never the browser's.
+    lesson_date: zonedCalendarDate(timezone, session.startsAt),
+    skill,
+    performance,
+    topic,
+    note,
+    // From the session cookie. `mistakes` is left to its `'{}'` default: the
+    // chip picker `mistake_tags` exists for is not part of this page.
+    created_by: teacherId,
+  });
+
+  if (error) {
+    logDbError("lesson_logs.insert", error);
+    failTo(sessionPath, "We could not save this note. Please try again.");
   }
 
   revalidatePath(sessionPath);

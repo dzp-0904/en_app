@@ -122,6 +122,32 @@ export function instantOf(zone: string, isoDate: string, isoTime: string): Date 
   return new Date(guess - offsetAt(zone, once));
 }
 
+/**
+ * An instant as the calendar date it falls on in `zone` — "2026-09-01".
+ *
+ * The inverse of `instantOf`, and the reason it exists: `lesson_logs.lesson_date`
+ * is a bare `date`, so writing one means deciding whose midnight bounds the day.
+ * A lesson that starts at 00:30 in Ho Chi Minh City is still 17:30 the previous
+ * day in UTC, and `new Date(...).toISOString().slice(0, 10)` would file it under
+ * that previous day. The class's own clock is the only one that answers "which
+ * day was this lesson".
+ *
+ * Assembled from parts rather than formatted, so the order never depends on what
+ * a locale happens to do with a numeric date.
+ */
+export function zonedCalendarDate(zone: string, instant: string): string {
+  const parts = formatterFor(zone, "calendar-date", "en-GB", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(instant));
+
+  const value = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value ?? "";
+
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}
+
 /** An instant as a date in `zone` — "Tue, 1 Sep 2026". */
 export function formatZonedDate(zone: string, instant: string): string {
   return formatterFor(zone, "date", "en-GB", {

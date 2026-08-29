@@ -2,6 +2,7 @@ import "server-only";
 
 import type { AttendanceStatus } from "@/lib/attendance";
 import type { CourseType } from "@/lib/course-type";
+import type { Performance, Skill } from "@/lib/lesson-log";
 import type { createClient } from "@/lib/supabase/server";
 
 /**
@@ -157,6 +158,36 @@ export type SessionAttendee = {
   attendance: AttendanceStatus | null;
 };
 
+/**
+ * One lesson note, and who it is about.
+ *
+ * `lesson_logs` is per student, not per lesson — `class_member_id` is NOT NULL
+ * and `session_id` is the nullable column — so a session has as many of these as
+ * the teacher has written, and each one names a student. The table has no unique
+ * constraint at all, so more than one note per student per session is permitted
+ * and this type does not pretend otherwise.
+ *
+ * `studentName` is null only where the roster no longer answers for the member,
+ * which the composite `on delete cascade` makes unreachable today. `note` is
+ * null for a row written without one; the column is nullable and this
+ * application's own form is what refuses an empty one.
+ *
+ * `lesson_date` is deliberately absent. It is derived from the session's own
+ * start, so on a session page it is a second copy of the date already in the
+ * header, and showing it twice would invite the reading that the two can differ.
+ */
+export type LessonNote = {
+  noteId: string;
+  /** class_members.id — the student the observation is about. */
+  membershipId: string;
+  studentName: string | null;
+  skill: Skill;
+  performance: Performance;
+  topic: string;
+  note: string | null;
+  createdAt: string;
+};
+
 /** `classes.id` and `class_members.id` are uuid columns. */
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -176,6 +207,17 @@ export function isUuid(value: string): boolean {
 /** The columns every class view needs, in one place so the two agree. */
 const CLASS_COLUMNS =
   "id, name, course_type, course_type_other, target_band, start_date, end_date, schedule_note, timezone";
+
+/**
+ * A lesson note and the name to show beside it, in one statement.
+ *
+ * The embed is hinted with `lesson_logs_member_fk` because that constraint is
+ * composite — `(class_member_id, class_id)` — so PostgREST has to be told which
+ * relationship is meant rather than inferring it from a single column. The
+ * nested hint is the one the roster queries already use.
+ */
+const LESSON_LOG_COLUMNS =
+  "id, class_member_id, skill, performance, topic, note, created_at, class_members!lesson_logs_member_fk(invited_name, profiles!class_members_student_id_fkey(full_name))";
 
 /** The columns every session view needs, in one place so the two agree. */
 const SESSION_COLUMNS = "id, starts_at, ends_at, title, status";
@@ -606,5 +648,58 @@ export async function loadSessionAttendance(
     email: member.profiles?.email ?? null,
     // Absent from the map means unmarked, which is not the same as `absent`.
     attendance: recorded.get(member.id) ?? null,
+  }));
+}
+
+/**
+ * Every lesson note written against this session, oldest first.
+ *
+ * One statement for the whole section — not one per student, and not one per
+ * note. The name each note is shown under travels with it through the embed
+ * rather than being looked up afterwards, so adding a fiftieth note adds no
+ * query.
+ *
+ * Filtered on the session AND the class, like `loadSessionAttendance` and for
+ * the same reason: `lesson_logs_session_fk` is `(session_id, class_id)`, so a
+ * row that disagreed could never have been stored, and the pair of filters is
+ * the query stating what the schema already guarantees. Underneath,
+ * `lesson_logs_teacher_all` admits only `app.my_class_ids()`.
+ *
+ * Ordered by `created_at`, which is the order they were written in. There is no
+ * other ordinal — the table carries no sequence column — and `lesson_date` is
+ * the same value on every row here, so it could not order anything.
+ *
+ * `null` means the query failed, `[]` means nothing has been written yet.
+ */
+export async function loadSessionLessonNotes(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+  sessionId: string,
+): Promise<LessonNote[] | null> {
+  const { data: logs, error } = await supabase
+    .from("lesson_logs")
+    .select(LESSON_LOG_COLUMNS)
+    .eq("session_id", sessionId)
+    .eq("class_id", classId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    logDbError("lesson_logs.select", error);
+    return null;
+  }
+
+  return (logs ?? []).map((log) => ({
+    noteId: log.id,
+    membershipId: log.class_member_id,
+    // The profile wins over the name the teacher typed, as on the roster.
+    studentName:
+      log.class_members?.profiles?.full_name ??
+      log.class_members?.invited_name ??
+      null,
+    skill: log.skill,
+    performance: log.performance,
+    topic: log.topic,
+    note: log.note,
+    createdAt: log.created_at,
   }));
 }
