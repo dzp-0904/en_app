@@ -13,7 +13,7 @@ import {
 import { invitationEmail } from "@/lib/mail/invitation-email";
 import { MailNotConfiguredError, sendMail } from "@/lib/mail/mailer";
 import { requireTeacher } from "@/lib/onboarding";
-import { isClassId, loadEditableClass, loadInviteCode } from "@/lib/teacher";
+import { isUuid, loadEditableClass, loadInviteCode } from "@/lib/teacher";
 import { joinUrl } from "@/lib/site-url";
 import { createClient } from "@/lib/supabase/server";
 
@@ -392,7 +392,7 @@ export async function updateClass(classId: string, formData: FormData) {
 
   // A segment that cannot name a class is a wrong link, not a server fault, and
   // it is rejected before PostgREST can turn it into `22P02`.
-  if (!isClassId(classId)) {
+  if (!isUuid(classId)) {
     notFound();
   }
 
@@ -480,7 +480,7 @@ export async function inviteStudentByEmail(
 ) {
   const teacher = await requireTeacher();
 
-  if (!isClassId(classId)) {
+  if (!isUuid(classId)) {
     notFound();
   }
 
@@ -603,9 +603,12 @@ export async function inviteStudentByEmail(
     });
 
     revalidateFor(origin);
+    // Worded for both callers. `resendInvitation` reaches this line too, and
+    // "was added to the class" would be untrue of somebody who was already on
+    // the list before the button was pressed.
     failTo(
       formPath,
-      `${email} was added to the class, but we could not send the email. Share the invitation link with them instead.`,
+      `We could not send the email to ${email}. Their invitation is saved — share the invitation link with them instead.`,
     );
   }
 

@@ -104,18 +104,19 @@ export type TeacherClassFieldsResult =
   | { kind: "not-found" }
   | { kind: "error" };
 
-/** `classes.id` is a uuid column, so anything else cannot name a row. */
+/** `classes.id` and `class_members.id` are uuid columns. */
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Whether a string could name a class at all.
+ * Whether a string could name a row at all.
  *
- * Exported so `updateClass` applies the same rule the loaders do. Without it a
- * mistyped id reaches PostgREST as `22P02 invalid input syntax for type uuid` —
- * a database error where the truth is simply that no such class exists.
+ * Exported so the Server Actions apply the same rule the loaders do. Without it
+ * a mistyped id reaches PostgREST as `22P02 invalid input syntax for type uuid`
+ * — a database error where the truth is simply that no such row exists. Both
+ * ids a roster action is handed are uuids, so one predicate covers them.
  */
-export function isClassId(value: string): boolean {
+export function isUuid(value: string): boolean {
   return UUID.test(value);
 }
 

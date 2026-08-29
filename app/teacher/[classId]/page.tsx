@@ -18,6 +18,8 @@ import { joinUrl } from "@/lib/site-url";
 import { createClient } from "@/lib/supabase/server";
 import { loadTeacherClass, type RosterEntry, type TeacherClassDetail } from "@/lib/teacher";
 
+import { cancelInvitation, removeStudent, resendInvitation } from "./actions";
+
 /**
  * One of the teacher's classes: what it is, how to invite people to it, and who
  * is in it.
@@ -123,12 +125,13 @@ export default async function TeacherClassPage({
   const { detail } = result;
   const link = detail.inviteCode ? await joinUrl(detail.inviteCode) : null;
 
-  // `inviteStudentByEmail` reports its failures the way every other action on
-  // this milestone does — by redirecting back with the message attached — so
-  // the page stays a Server Component and the form works without JavaScript.
+  // Every action on this page — inviting, removing, cancelling, resending —
+  // reports failure the same way: by redirecting back with the message
+  // attached, so the page stays a Server Component and each form works without
+  // JavaScript. One banner serves all of them, at the top, because that is
+  // where the reader arrives after the redirect.
   const query = await searchParams;
-  const inviteError =
-    typeof query.error === "string" ? query.error : undefined;
+  const error = typeof query.error === "string" ? query.error : undefined;
 
   const students = detail.roster.filter((entry) => entry.status === "joined");
   const pending = detail.roster.filter((entry) => entry.status === "invited");
@@ -149,6 +152,8 @@ export default async function TeacherClassPage({
         </Button>
       </div>
 
+      {error ? <Alert className="mb-5">{error}</Alert> : null}
+
       <Card>
         <dl className="space-y-3">
           {factsFor(detail).map((fact) => (
@@ -165,8 +170,6 @@ export default async function TeacherClassPage({
       <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
         Invite students
       </h2>
-
-      {inviteError ? <Alert className="mb-5">{inviteError}</Alert> : null}
 
       {link ? (
         <Card>
@@ -233,6 +236,18 @@ export default async function TeacherClassPage({
                     Joined {DATE.format(new Date(entry.joinedAt))}
                   </p>
                 ) : null}
+
+                <Confirm
+                  label="Remove student"
+                  prompt={`${nameOf(entry)} will be taken off this class list. Their account and any other classes they are in are not affected.`}
+                  confirmLabel="Remove student"
+                  pendingLabel="Removing…"
+                  action={removeStudent.bind(
+                    null,
+                    detail.classId,
+                    entry.membershipId,
+                  )}
+                />
               </Card>
             </li>
           ))}
@@ -258,6 +273,36 @@ export default async function TeacherClassPage({
                       ? `Invitation sent ${DATE.format(new Date(entry.inviteEmailSentAt))}`
                       : "Added, but the invitation email has not gone out — share the link with them."}
                   </p>
+
+                  {/* Only offered when there is something to send and somewhere
+                      to send it: the message carries the invitation link, and a
+                      row invited by link alone has no address on it. */}
+                  {link && entry.email ? (
+                    <form
+                      action={resendInvitation.bind(
+                        null,
+                        detail.classId,
+                        entry.membershipId,
+                      )}
+                      className="mt-3"
+                    >
+                      <Button type="submit" variant="outline" size="sm">
+                        Resend invitation
+                      </Button>
+                    </form>
+                  ) : null}
+
+                  <Confirm
+                    label="Cancel invitation"
+                    prompt={`${nameOf(entry)} will be taken off this class list. You can invite them again afterwards.`}
+                    confirmLabel="Cancel invitation"
+                    pendingLabel="Cancelling…"
+                    action={cancelInvitation.bind(
+                      null,
+                      detail.classId,
+                      entry.membershipId,
+                    )}
+                  />
                 </Card>
               </li>
             ))}
@@ -265,6 +310,61 @@ export default async function TeacherClassPage({
         </>
       ) : null}
     </Frame>
+  );
+}
+
+/** Whoever the card is about, however much of them the row knows. */
+function nameOf(entry: RosterEntry): string {
+  return entry.name ?? entry.email ?? "This student";
+}
+
+/**
+ * A destructive action behind an explicit confirmation.
+ *
+ * `<details>` rather than a dialog or a `confirm()` call, because every other
+ * form on this milestone posts without JavaScript and this one does too: the
+ * disclosure is the browser’s own, the submit button only exists once it is
+ * open, and the summary turns into the way back out. Nothing here is a client
+ * component except the submit button, which is the same purely additive
+ * pending state the invite form uses.
+ *
+ * The button is the outline treatment in the destructive pair rather than a new
+ * variant — the Figma has no destructive button, and the tinted-surface-plus-
+ * hairline pattern it does have is what `Alert` is already built from.
+ */
+function Confirm({
+  label,
+  prompt,
+  confirmLabel,
+  pendingLabel,
+  action,
+}: {
+  label: string;
+  prompt: string;
+  confirmLabel: string;
+  pendingLabel: string;
+  action: () => Promise<void>;
+}) {
+  return (
+    <details className="group mt-3">
+      <summary className="inline-flex cursor-pointer list-none items-center text-sm font-medium text-destructive hover:underline [&::-webkit-details-marker]:hidden">
+        <span className="group-open:hidden">{label}</span>
+        <span className="hidden group-open:inline">Never mind</span>
+      </summary>
+
+      <div className="mt-3 rounded-lg border border-destructive/25 bg-destructive-light p-3.5">
+        <p className="mb-3 text-sm text-destructive">{prompt}</p>
+
+        <form action={action}>
+          <SubmitButton
+            pendingLabel={pendingLabel}
+            className="border border-destructive/30 bg-card px-3 py-2 text-xs font-medium text-destructive hover:bg-background"
+          >
+            {confirmLabel}
+          </SubmitButton>
+        </form>
+      </div>
+    </details>
   );
 }
 
