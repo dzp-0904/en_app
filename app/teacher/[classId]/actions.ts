@@ -4,10 +4,10 @@ import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 
 import { inviteStudentByEmail } from "@/app/onboarding/actions";
+import { isAttendanceStatus } from "@/lib/attendance";
 import { requireTeacher } from "@/lib/onboarding";
 import { createClient } from "@/lib/supabase/server";
 import {
-  isAttendanceStatus,
   isUuid,
   loadClassSession,
   loadEditableClass,

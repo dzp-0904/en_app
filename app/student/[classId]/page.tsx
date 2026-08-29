@@ -6,19 +6,29 @@ import type { ReactNode } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ATTENDANCE_LABELS } from "@/lib/attendance";
 import { LABELS, isOfferedCourseType } from "@/lib/course-type";
 import { loadUserState } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
-import { loadStudentClass, type StudentClassDetail } from "@/lib/student";
+import {
+  loadStudentClass,
+  loadStudentLessons,
+  type StudentClassDetail,
+  type StudentLesson,
+} from "@/lib/student";
 import { createClient } from "@/lib/supabase/server";
+import { formatZonedDate, formatZonedTime } from "@/lib/time";
 
 /**
  * One of the student's classes.
  *
- * The foundation only: who teaches it, what it is, when it runs. Lessons,
- * homework and progress are not read here because nothing reads them yet, and
- * the placeholder at the bottom says so rather than showing an empty chart that
- * implies data exists.
+ * Who teaches it, what it is, when it runs, and the lessons the teacher has
+ * scheduled with this student's own mark against each. Homework and progress
+ * are still not read here, because nothing writes them yet.
+ *
+ * Everything on this page is read-only. There is no Server Action in this
+ * route and no control that can reach one: attendance is the teacher's to
+ * record, and a student's copy of it is a report, not a form.
  *
  * Identity comes from `loadUserState`, exactly as `/student` does, so there is
  * one answer to "who is this request" and not two. Membership comes from
@@ -120,6 +130,15 @@ export default async function StudentClassPage({
   const { detail } = result;
   const facts = factsFor(detail);
 
+  // Only now: `detail.membershipId` came from the membership query above, which
+  // was filtered by `getUser()`'s id. Nothing off the URL reaches this call
+  // except `classId`, which has just been proved to be one of this student's.
+  const lessons = await loadStudentLessons(
+    supabase,
+    detail.classId,
+    detail.membershipId,
+  );
+
   return (
     <Frame>
       <div className="mb-8">
@@ -151,16 +170,81 @@ export default async function StudentClassPage({
       </Card>
 
       <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Coursework
+        Lessons
       </h2>
 
-      <Card>
-        <p className="text-sm text-muted-foreground">
-          Your lessons, homework and progress will appear here once your teacher
-          starts recording them.
-        </p>
-      </Card>
+      {lessons === null ? (
+        // Not "no lessons": the query failed, and the two must not look alike.
+        <Alert>
+          We couldn&apos;t load your lessons just now. Please refresh the page.
+        </Alert>
+      ) : lessons.length === 0 ? (
+        <Card>
+          <p className="text-sm text-muted-foreground">
+            No lessons have been recorded yet.
+          </p>
+        </Card>
+      ) : (
+        <ul className="space-y-3">
+          {lessons.map((lesson) => (
+            <li key={lesson.sessionId}>
+              <Card>
+                <Lesson lesson={lesson} timezone={detail.timezone} />
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
     </Frame>
+  );
+}
+
+/**
+ * One lesson, and what was recorded for this student at it.
+ *
+ * The same two formatters the teacher's lesson list uses, given the same class
+ * timezone, so the hour a student reads is the hour their teacher entered. See
+ * `lib/time.ts`; there is no date arithmetic here.
+ *
+ * A cancelled lesson shows that it was cancelled and no attendance line at all.
+ * Attendance at a lesson that did not happen is not a fact about the student,
+ * and the database agrees: `v_member_session_attendance` excludes cancelled
+ * sessions from the attendance rule entirely.
+ */
+function Lesson({
+  lesson,
+  timezone,
+}: {
+  lesson: StudentLesson;
+  timezone: string;
+}) {
+  return (
+    <>
+      <p className="font-medium text-foreground">
+        {formatZonedDate(timezone, lesson.startsAt)} ·{" "}
+        {formatZonedTime(timezone, lesson.startsAt)} –{" "}
+        {formatZonedTime(timezone, lesson.endsAt)}
+      </p>
+
+      {lesson.title ? (
+        <p className="mt-1 text-sm text-foreground">{lesson.title}</p>
+      ) : null}
+
+      {lesson.status === "cancelled" ? (
+        <p className="mt-2 text-sm text-muted-foreground">Cancelled</p>
+      ) : (
+        <p className="mt-2 text-sm text-muted-foreground">
+          Attendance:{" "}
+          <span className="text-foreground">
+            {/* Null is unmarked, which is a state of its own — never `absent`,
+                and never a row invented to make the line read better. */}
+            {lesson.attendance === null
+              ? "Not recorded"
+              : ATTENDANCE_LABELS[lesson.attendance]}
+          </span>
+        </p>
+      )}
+    </>
   );
 }
 

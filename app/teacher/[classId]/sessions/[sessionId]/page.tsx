@@ -6,12 +6,11 @@ import type { ReactNode } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ATTENDANCE_LABELS, ATTENDANCE_STATUSES } from "@/lib/attendance";
 import { requireTeacher } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
 import { createClient } from "@/lib/supabase/server";
 import {
-  ATTENDANCE_LABELS,
-  ATTENDANCE_STATUSES,
   loadClassSession,
   loadEditableClass,
   loadSessionAttendance,

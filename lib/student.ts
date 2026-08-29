@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { AttendanceStatus } from "@/lib/attendance";
 import type { CourseType } from "@/lib/course-type";
 import type { createClient } from "@/lib/supabase/server";
 
@@ -109,6 +110,15 @@ export type StudentClassDetail = StudentClass & {
   startDate: string;
   endDate: string | null;
   scheduleNote: string | null;
+  /**
+   * `classes.timezone` — the clock every session of this class is read on.
+   *
+   * Carried here so the lesson list can hand it to `lib/time.ts` unchanged.
+   * The alternative is a second lookup, or worse a second idea of what time it
+   * is: a session is stored as an instant, and the only zone that turns it back
+   * into the hour on the timetable is the class's own.
+   */
+  timezone: string;
 };
 
 /**
@@ -162,7 +172,7 @@ export async function loadStudentClass(
   const { data, error } = await supabase
     .from("class_members")
     .select(
-      "id, joined_at, classes!inner(id, name, course_type, course_type_other, target_band, start_date, end_date, schedule_note, profiles!inner(full_name))",
+      "id, joined_at, classes!inner(id, name, course_type, course_type_other, target_band, start_date, end_date, schedule_note, timezone, profiles!inner(full_name))",
     )
     .eq("student_id", studentId)
     .eq("class_id", classId)
@@ -194,6 +204,111 @@ export async function loadStudentClass(
       startDate: data.classes.start_date,
       endDate: data.classes.end_date,
       scheduleNote: data.classes.schedule_note,
+      timezone: data.classes.timezone,
     },
   };
+}
+
+/**
+ * One lesson of the student's class, with their own mark for it.
+ *
+ * `attendance` is null when no `session_attendance` row exists for this student
+ * at this session, and that is a real state rather than a missing one: rows are
+ * created only when a teacher records something. It is deliberately not read as
+ * `absent` — the page says "Not recorded", and nothing here invents a row to
+ * fill the gap.
+ */
+export type StudentLesson = {
+  sessionId: string;
+  startsAt: string;
+  endsAt: string;
+  title: string | null;
+  status: "scheduled" | "completed" | "cancelled";
+  attendance: AttendanceStatus | null;
+};
+
+/**
+ * The class's lessons and this student's own attendance at them.
+ *
+ * ## Why not `v_member_session_attendance`
+ *
+ * It is the obvious candidate and it is the wrong grain for this screen. The
+ * view answers "what should this student's attendance *rate* be built from",
+ * and to do that it drops rows on purpose: cancelled sessions, sessions that
+ * have not started, sessions before the member joined, and — decisively —
+ * every session the student was marked `excused` for, which is excluded from
+ * numerator and denominator alike. A student marked Excused would find the
+ * lesson simply absent from their own list, and the milestone requires that
+ * exact word to be shown. The view also carries neither `ends_at` nor `title`,
+ * so it cannot render the line above the status either. It stays as it is, for
+ * the rate calculations it was written for.
+ *
+ * ## What authorises this
+ *
+ * `membershipId` is `class_members.id` as returned by `loadStudentClass`, which
+ * derived it from `getUser()` — it is never a value off the URL or a form, and
+ * there is no argument here that a browser can choose except `classId`, which
+ * selects rather than authorises. Underneath, the two policies say the same
+ * thing again: `class_sessions_student_select` admits only
+ * `app.my_student_class_ids()` (`join_status = 'joined'`, `removed_at is null`),
+ * and `session_attendance_student_select` admits only `app.my_member_ids()` —
+ * memberships whose `student_id` is `auth.uid()`. Another student's row is not
+ * filtered out of this result; it never arrives in the process at all.
+ *
+ * Two queries, neither of them per lesson, so this is not an N+1. `null` means
+ * a query failed and is deliberately not `[]`, which means the class has no
+ * lessons yet.
+ */
+export async function loadStudentLessons(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+  membershipId: string,
+): Promise<StudentLesson[] | null> {
+  const { data: sessions, error: sessionError } = await supabase
+    .from("class_sessions")
+    .select("id, starts_at, ends_at, title, status")
+    .eq("class_id", classId)
+    // Chronological on the stored instant, which is what the
+    // `(class_id, starts_at)` unique constraint's index already orders.
+    .order("starts_at", { ascending: true });
+
+  if (sessionError) {
+    console.error("[student] failed to load lessons", {
+      code: sessionError.code,
+      message: sessionError.message,
+    });
+    return null;
+  }
+
+  if (!sessions || sessions.length === 0) return [];
+
+  // Scoped to this membership in the WHERE clause, not in TypeScript. The
+  // policy would refuse another student's rows regardless; asking only for
+  // one's own is the query saying what it means.
+  const { data: marks, error: markError } = await supabase
+    .from("session_attendance")
+    .select("session_id, status")
+    .eq("class_id", classId)
+    .eq("class_member_id", membershipId);
+
+  if (markError) {
+    console.error("[student] failed to load attendance", {
+      code: markError.code,
+      message: markError.message,
+    });
+    return null;
+  }
+
+  const recorded = new Map<string, AttendanceStatus>();
+  for (const mark of marks ?? []) recorded.set(mark.session_id, mark.status);
+
+  return sessions.map((session) => ({
+    sessionId: session.id,
+    startsAt: session.starts_at,
+    endsAt: session.ends_at,
+    title: session.title,
+    status: session.status,
+    // Absent from the map means unmarked, which is not the same as `absent`.
+    attendance: recorded.get(session.id) ?? null,
+  }));
 }

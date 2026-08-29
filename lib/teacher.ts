@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { AttendanceStatus } from "@/lib/attendance";
 import type { CourseType } from "@/lib/course-type";
 import type { createClient } from "@/lib/supabase/server";
 
@@ -137,48 +138,6 @@ export type ClassSessionResult =
   | { kind: "ok"; session: ClassSession }
   | { kind: "not-found" }
   | { kind: "error" };
-
-/**
- * `public.attendance_status`, in full.
- *
- * All four values, because all four are already modelled and the difference
- * between them is load-bearing rather than decorative:
- * `v_member_session_attendance` counts `present` and `late` in the numerator,
- * `absent` in the denominator only, and drops an `excused` session from both.
- * Offering a teacher only two of them would make the one status that can
- * legitimately excuse a student from the denominator unreachable from the
- * application, and no other screen can set it.
- *
- * The order is the order they are offered in, most to least common.
- */
-export const ATTENDANCE_STATUSES = [
-  "present",
-  "late",
-  "absent",
-  "excused",
-] as const;
-
-export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
-
-/** What each status is called on screen. */
-export const ATTENDANCE_LABELS: Record<AttendanceStatus, string> = {
-  present: "Present",
-  late: "Late",
-  absent: "Absent",
-  excused: "Excused",
-};
-
-/**
- * Whether a submitted value is one of the enum's four.
- *
- * The allow-list, not a cast. Postgres would reject anything else with
- * `22P02 invalid input value for enum`, which is a database error standing in
- * for what is really a malformed request, and one whose text should not reach a
- * user. Rejecting it here keeps the failure in the application's own vocabulary.
- */
-export function isAttendanceStatus(value: string): value is AttendanceStatus {
-  return (ATTENDANCE_STATUSES as readonly string[]).includes(value);
-}
 
 /**
  * One active student on a session's attendance list, with whatever was recorded
