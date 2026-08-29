@@ -3,6 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+
+      # Build args only for values Next.js inlines into the client bundle at
+      # build time. Nothing secret belongs here: a build arg is recorded in the
+      # image history and readable with `docker history`.
       args:
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
@@ -12,6 +16,19 @@ services:
     environment:
       NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+
+      # Runtime only, by design.
+      #
+      # SITE_URL is read per request, so the same image can serve staging and
+      # production. The SMTP credentials are read lazily by lib/mail/mailer.ts
+      # when a message is actually sent, which is why `next build` succeeds in
+      # the Dockerfile with no mailbox configured — and why the password never
+      # enters the image. Rotating it needs a restart, not a rebuild.
+      SITE_URL: ${SITE_URL}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
 
     ports:
       - "127.0.0.1:3000:3000"

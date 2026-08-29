@@ -62,6 +62,24 @@ export type PageSearchParams = {
 };
 
 /**
+ * Props for a page with dynamic segments.
+ *
+ * The note above says the generated `PageProps<Route>` earns its keep here,
+ * because it types the segment names from the filesystem. It is still not used,
+ * for the reason the note gives: it lives in `.next/types`, so depending on it
+ * would make `tsc --noEmit` fail on a clone that has never been built. The
+ * segment names are written out instead — one line of duplication, checked
+ * against reality by `next build`'s own validator.
+ *
+ * Every value is a string because Next.js decodes URL segments into strings; a
+ * `[...slug]` catch-all would need `string[]` and is not modelled here.
+ */
+export type DynamicPageProps<Params extends Record<string, string>> = {
+  params: Promise<Params>;
+  searchParams: Promise<SearchParams>;
+};
+
+/**
  * Props for a layout with no dynamic segments and no parallel-route slots.
  *
  * The generated `LayoutProps<Route>` also supplies `params` and any named slots;
