@@ -2,129 +2,183 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/*
+ * EduTrack design tokens.
+ *
+ * Source of truth: the "Teacher Authentication Flow" Figma Make file
+ * (pq6YXXMf03DDXImKFjkGCs), whose `src/index.css` declares the palette below.
+ *
+ * Two deliberate differences from that file:
+ *
+ * 1. The Figma declares these as a Tailwind `@theme` block and then never uses
+ *    it — every screen hardcodes `bg-[#4466EE]` and friends. Here the values are
+ *    bound to the shadcn semantic tokens instead, so shadcn components inherit
+ *    the palette and application code names roles rather than hex.
+ *
+ * 2. `--cream-dark` is `#EEEDE6`. The Figma source reads `#EEEDЕ6`, whose fifth
+ *    character is a Cyrillic Е (U+0415) rather than a Latin E — not a valid hex
+ *    colour, so the token is dead there. The Latin spelling is restored.
+ *
+ * There is no dark mode: the Figma specifies none, and nothing in the app sets
+ * the `.dark` class. The shadcn dark palette and the `dark` custom variant have
+ * both been removed rather than left to resolve against undefined values.
+ */
 
 @theme inline {
+  /* shadcn semantic roles */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Figma palette entries with no shadcn equivalent */
+  --color-navy: var(--navy);
+  --color-navy-70: var(--navy-70);
+  --color-primary-hover: var(--primary-hover);
+  --color-cream-dark: var(--cream-dark);
+  --color-placeholder: var(--placeholder);
+  --color-decorative: var(--decorative);
+  --color-destructive-light: var(--destructive-light);
+  --color-green: var(--green);
+  --color-green-light: var(--green-light);
+  --color-orange: var(--orange);
+  --color-orange-light: var(--orange-light);
+
+  --font-sans: var(--font-public-sans);
+  --font-serif: var(--font-lora);
+  --font-heading: var(--font-public-sans);
+
+  /*
+   * The Figma uses exactly three radii — 8px on inputs, buttons and chips,
+   * 12px on the logo mark and selectable cards, 16px on surfaces. The step
+   * multipliers are set so `lg`/`xl`/`2xl` land on those values precisely.
+   */
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.75);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-xl: calc(var(--radius) * 1.5);
+  --radius-2xl: calc(var(--radius) * 2);
+  --radius-3xl: calc(var(--radius) * 3);
+  --radius-4xl: calc(var(--radius) * 4);
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
+  --background: #f7f6f1; /* cream */
+  --foreground: #1b2036; /* navy */
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --card: #ffffff;
+  --card-foreground: #1b2036;
+  --popover: #ffffff;
+  --popover-foreground: #1b2036;
+
+  --primary: #4466ee;
+  --primary-foreground: #ffffff;
+  --primary-hover: #3355dd;
+
+  /* primary-light in the Figma: selected states and tinted panels */
+  --secondary: #edf0ff;
+  --secondary-foreground: #4466ee;
+  --accent: #edf0ff;
+  --accent-foreground: #4466ee;
+
+  --muted: #eeede6; /* cream-dark */
+  /*
+   * The Figma assigns #8A8FA8 to every subtitle, helper line and secondary
+   * label. On cream that measures 2.72:1 — below the 4.5:1 AA floor for text
+   * under 18.66px, which is all of it. `muted-foreground` therefore carries
+   * navy-70 (#4A5170, 7.18:1) so that shadcn's default secondary-text token is
+   * accessible everywhere it is used.
+   */
+  --muted-foreground: #4a5170;
+
+  --navy: #1b2036;
+  --navy-70: #4a5170;
+  --cream-dark: #eeede6;
+
+  /* Input placeholders only. Exempt from the contrast floor: every field has an
+     associated <label> carrying the accessible name. */
+  --placeholder: #c5c3bb;
+
+  /* The Figma's #8A8FA8. Reserved for decorative marks and text at or above
+     18.66px bold / 24px regular. Never use it for body copy — see above. */
+  --decorative: #8a8fa8;
+
+  /*
+   * The Figma styles field errors with Tailwind's red-400/red-500. red-500
+   * (#EF4444) on cream is 3.5:1, and red-600 lands at 4.46:1 — still short — so
+   * the error red is darkened one further step to clear AA at 6.08:1. The
+   * -light tint follows the Figma's own green/green-light pairing convention.
+   */
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
+  --destructive-light: #fdf3f1;
+
+  --green: #3ba876;
+  --green-light: #edfaf4;
+  --orange: #e8834a;
+  --orange-light: #fef3eb;
+
+  --border: #e8e6de;
+  --input: #e8e6de;
+  --ring: #4466ee;
+
+  --radius: 8px;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+
+  html {
+    @apply font-sans;
+  }
+
   body {
     @apply bg-background text-foreground;
   }
-  html {
-    @apply font-sans;
+
+  /*
+   * Slim, self-effacing scrollbars, carried over from the Figma's index.css.
+   */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 3px;
+  }
+  *:hover::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--navy) 25%, transparent);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
