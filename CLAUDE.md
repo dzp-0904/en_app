@@ -5,7 +5,7 @@ Read it in full before starting any milestone. Do not ask the user for anything
 that is already answered here, in the repository, in git history, or in the
 current milestone prompt.
 
-Last updated: 2026-08-30, after M23.
+Last updated: 2026-08-30, after M24.
 
 ---
 
@@ -98,8 +98,10 @@ Everything else is a Server Component. Do **not** add `"use client"` without a
 concrete interaction reason. M22 replaced `components/shell/nav-item.tsx` with
 `components/shell/nav.tsx` — one component marking the active row for seven nav
 entries instead of one per row — so the count did not change. M23 added the
-sixth, `components/ui/pending-bar.tsx`, which is client for one reason:
-`useLinkStatus()` is a hook and must be called by a descendant of `<Link>`.
+sixth, which is client for one reason: `useLinkStatus()` is a hook and must be
+called by a descendant of `<Link>`. M24 renamed that file
+`components/ui/pending-bar.tsx` → `components/ui/pending-tint.tsx` and changed
+what it draws (see decision **U**); the count still did not change.
 
 ```
 components/shell/nav.tsx
@@ -107,7 +109,7 @@ components/roster/tag-editor.tsx
 components/auth/submit-button.tsx
 components/onboarding/copy-field.tsx
 components/attendance/status-buttons.tsx
-components/ui/pending-bar.tsx
+components/ui/pending-tint.tsx
 ```
 
 Note that `components/student/band-progress.tsx` is a **Server** Component — a
@@ -825,7 +827,12 @@ known gaps.
      Figma sets it as a 10px subtitle under the wordmark, with a rule closing
      the logo block — now `LogoMark subtitle=`.
 - **The navigation delay: root cause, measured not guessed.** One warm Supabase
-  round trip on this hosted project is **~62-67 ms**. Every teacher list page
+  round trip on this hosted project was measured here at **~62-67 ms**. (M24
+  re-measured this from Node, outside the browser's CORS preflight, and found
+  the hops are **not** all the same size: PostgREST is **76-91 ms** and
+  `auth.getUser()` is **146-150 ms**. The M23 conclusion — six sequential trips
+  is the problem — is unaffected; the per-hop figure it quotes is low and
+  averages two different costs.) Every teacher list page
   ran **six strictly sequential** trips — `auth.getUser()` → `profiles` →
   `classes` probe → `classes` → `class_members` tally → the feature loader —
   ≈400 ms, matching a measured 280-745 ms server render and 496-1024 ms from
@@ -900,22 +907,139 @@ known gaps.
     sequential round trips versus fewer — but the absolute numbers move with
     network latency and are not a benchmark.
 
-## 14. Current project state (verified 2026-08-30)
+### M24 — Navigation responsiveness and interaction polish
+- **Diagnosed before any edit, as the brief required.** The upstream hops were
+  timed from **Node** rather than the browser: a `fetch` carrying an `apikey`
+  header triggers a CORS preflight that roughly doubles what the page sees, and
+  an RSC probe (`-H "RSC: 1"`) returns a flat ~220 ms without doing a full
+  render — both instruments were tried and discarded. The real split:
+  **`auth.getUser()` 146-150 ms**, **PostgREST 76-91 ms**. The Auth hop is
+  ~2× a database hop and was the single most expensive, strictly-blocking one.
+- **Two structural defects, both real, both fixed:**
+  1. **`getUser()` was awaited alone at the head of `readUserState`**, delaying
+     reads that do not depend on its answer. The subject id now comes from
+     **`getClaims()`** — local WebCrypto verification against a cached JWKS, no
+     round trip — and `getUser()`, the `profiles` read and the class read are
+     issued **concurrently**. `getUser()` still runs on every request and still
+     decides: no claims → anonymous with **no query issued at all**; claims but
+     `getUser()` says no → anonymous with **every row discarded unread**. The
+     reads carry the very token being checked, so RLS scopes them to that
+     subject whatever `sub` says. Same decision, same evidence, one trip
+     earlier.
+  2. **`classes` was read twice on every teacher page** — `readUserState`'s
+     `select id, name … limit(2)` probe, then `loadTeacherClassList`'s identical
+     query (same table, same `eq`/`is`/`order`, wider projection) one round trip
+     later. The probe is now `loadTeacherClassList` itself and the rows ride on
+     `TeacherContext.classes`; `/teacher`, `/teacher/classes`, `/teacher/calendar`,
+     `/teacher/lesson-logs`, `/teacher/reports` and `/teacher/tuition` take the
+     list from there. `loadTeacherClasses` and `loadTeacherDashboard` now accept
+     rows instead of a teacher id. The `classes === null` alert branches on the
+     four pages went with it — an unreadable class list is reported one layer up
+     as an unplaceable account, so those branches were unreachable.
+- **Deliberately declined:** dropping `.in("class_id", scope)` from the feature
+  loaders to parallelise them (trades defence-in-depth scoping for ~82 ms);
+  starting feature loaders before `getUser()` answers (data queries ahead of the
+  authorization answer); speculatively parallelising the student
+  `loadStudentClasses` read (a wasted statement on every teacher request, for a
+  route nobody reported as slow).
+- **The reported underline was M23's own `PendingBar`** — confirmed by
+  screenshotting a navigation mid-flight. A 2px rule the width of the label, a
+  few pixels under it, on a link, is text decoration however it was intended,
+  and nothing in the Figma underlines anything. Replaced by
+  **`components/ui/pending-tint.tsx`**: the same `useLinkStatus()` state drawn
+  as `absolute inset-0 bg-current/10 rounded-[inherit] animate-pulse` — the
+  label's own colour at a tenth strength, invisible over the text and a light
+  wash over the row, taking the host's radius so a `rounded-lg` nav row, a
+  `rounded-md` tab and a `rounded-full` pill all fit. Measured live: the element
+  is exactly the link's box (40×199), `border-radius: 8px`, and `pending-bar`
+  count is 0.
+- **A second defect found during verification: the focus ring never rendered
+  anywhere.** In Tailwind v4 `outline-none` emits `--tw-outline-style: none`,
+  and the width utility `outline-2` emits `outline-style: var(--tw-outline-style)`
+  — so `outline-none focus-visible:outline-2` resolves to `outline-style: none`
+  and paints nothing. Measured `outlineStyle: "none"` on every focused nav link,
+  confirmed against the compiled CSS, screenshotted before and after. Fixed by
+  adding `focus-visible:outline-solid` at **11 occurrences across 10 files**.
+  `components/onboarding/radio-card.tsx` was deliberately left alone: its
+  `peer-focus-visible:outline-2` sits on a `<span>` with no `outline-none`, so
+  `--tw-outline-style` is already `solid` there and it always worked.
+- **Verified** against the production standalone build on `localhost:3000`,
+  with the network conditions re-measured either side (getUser 150→146 ms,
+  PostgREST 76-85→82-91 ms) so the wins are the code and not the weather:
+  - **Full document render, before → after (ms):** `/teacher` 783→676 ·
+    `/teacher/classes` 757→425 · `/teacher/calendar` 630→468 ·
+    `/teacher/lesson-logs` 675→490 · `/teacher/reports` →487 ·
+    `/teacher/tuition` 724→472 · `/teacher/settings` 475→386.
+  - **Click to content, before → after (ms):** Lớp học 356→227 · Lịch dạy
+    419→221 · Nhật ký buổi học 471→365 · Báo cáo 460→273 · Học phí 344→277 ·
+    Cài đặt 195→181 · Tổng quan 556→434.
+  - **Click to feedback stayed 1-2 ms on all 17 controls.** Class-detail tabs
+    with the M19 prefetch warm: **9 ms, 0 requests**; clicked cold before the
+    prefetch lands, 390-500 ms.
+  - **Responsive:** 16 teacher paths, 3 student paths and 5 anonymous paths ×
+    6 widths (1280/1024/768/390/360/320) — **0 problems**, no page-level
+    horizontal scroll, no clipping beyond the two by-design cases.
+  - **Accessibility: 0 problems** on every page — one `h1`, one
+    `aria-current="page"` per labelled landmark, no nameless controls, no
+    unlabelled inputs.
+  - **No-JS:** 16/16 teacher and 3/3 student pages render with h1, seven nav
+    links, breadcrumbs and forms; **`pendingTints=0` everywhere**; the teacher
+    lesson page still emits its **four** attendance submit buttons (M12 intact).
+  - **Console: 0 errors, 0 warnings** across 16 teacher, 3 student and 5
+    anonymous pages.
+  - **Filters and history:** all eight skill/class controls, both tab groups,
+    the roster filter and the seven sidebar sections; deep links, refresh,
+    Back ×2 and Forward; `?student=` opens the panel and Close preserves
+    `filter=stable` **and** the roster anchor; stale and malformed `?student=`
+    still alert rather than 404.
+  - **Security:** the student account is redirected to `/student` from **all 11**
+    teacher routes; a foreign class id is `notFound()` on `/teacher/<id>`,
+    `/edit` and `/sessions/new`; anonymous hits on `/teacher`, `/student` and
+    `/onboarding` all redirect to `/auth/login`. `git diff --stat` is **empty**
+    for `components/attendance/`, `app/teacher/[classId]/actions.ts`,
+    `app/auth/actions.ts`, `app/onboarding/actions.ts`,
+    `app/join/[code]/actions.ts`, `app/teacher/settings/actions.ts`,
+    `supabase/`, `proxy.ts` and `lib/supabase/`. `useFormStatus` still at
+    `components/attendance/status-buttons.tsx:46`.
+  - `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ · **25 routes**.
+  - Diff: **19 files changed, 174 insertions(+), 167 deletions(-)**, plus the
+    new `components/ui/pending-tint.tsx` replacing the deleted
+    `components/ui/pending-bar.tsx`.
+- **Limitations:**
+  - `getUser()` is still one full Auth round trip on every authenticated
+    request and it still gates the answer. M24 moved it off the critical path's
+    head; it did not remove it, and removing it would remove the revocation
+    check.
+  - The **cold** class-detail tab (clicked before M19's prefetch has landed) is
+    still 390-500 ms. That is the same server render every other route pays for.
+  - The attendance and score **write** paths were again not exercised — the only
+    seeded class is real production data. M12/M13 coverage plus the no-JS render
+    of the four buttons is what stands behind them.
+  - `tuition_records` and `monthly_reports` are still empty in production, so
+    those pages were seen only in their empty state.
+  - Millisecond figures are in-page and Node instrumentation on this machine
+    against a hosted Supabase project. Reproducible in kind, not a benchmark.
+
+## 14. Current project state (verified 2026-08-30, after M24)
 
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `461e251` — "fix: polish navigation performance and UI (M23)" |
-| `origin/main` | `7449ef8` — **M22 IS pushed; M23 is committed locally and NOT
-  pushed.** The M22-era note here saying `ad4ed65` / "not pushed" was stale:
-  the user pushed M22 between sessions. |
+| HEAD | `98de694` — "perf: cut authenticated round trips and fix nav feedback (M24)" |
+| `origin/main` | `cedf66d` — **M23 IS pushed** (the earlier note claiming it was
+  local-only was stale). **M24 is committed locally and NOT pushed.** |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
 | Working tree | **clean** |
 | Routes | **25** (24 `page.tsx` + `app/auth/callback/route.ts`) — unchanged by
-  M23, which added no route |
+  M24, which added no route |
 | Migrations | 15, unchanged since the database foundation commit |
 | RLS | enabled + FORCEd on 13 tables |
 | Gates | `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ |
+
+**Measured hop costs against this hosted Supabase project** (from Node, outside
+the browser's CORS preflight): `auth.getUser()` **146-150 ms**, PostgREST
+**76-91 ms**. Any future latency argument should start from those two numbers,
+not from a single averaged "one round trip" figure.
 
 ### Route map
 
@@ -1003,11 +1127,21 @@ Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
 - **T.** The Figma has **no `Classes.tsx`**. `/teacher/classes` has no design to
   be faithful to; it is `Dashboard.tsx`'s class card, elaborated. Do not
   "restore fidelity" to a screen that does not exist.
-- **U.** Click feedback is `PendingBar` (`useLinkStatus`), never an optimistic
+- **U.** Click feedback is `PendingTint` (`useLinkStatus`), never an optimistic
   selection. It claims nothing: it does not move `aria-current`, does not
   restyle the pill as chosen, and renders nothing without JavaScript. Do not
-  replace it with `loading.tsx` on a search-param route — that blanks the
-  filter row along with the content.
+  replace it with `loading.tsx` on a search-param route — that blanks the filter
+  row along with the content. It is a **wash over the whole control**
+  (`inset-0`, `bg-current/10`, `rounded-[inherit]`), not M23's hairline: a 2px
+  rule under a link reads as an underline, the user reported it as one, and the
+  Figma underlines nothing. Do not put the feedback back on one edge.
+- **V.** In Tailwind v4, `outline-none` sets `--tw-outline-style: none` and the
+  width utility `outline-2` renders `outline-style: var(--tw-outline-style)` —
+  so `outline-none focus-visible:outline-2` paints **no ring at all**. Wherever
+  both sit on the same element, `focus-visible:outline-solid` must sit there
+  too. This is why every focusable control in the app carries the trio
+  `focus-visible:outline-solid focus-visible:outline-2
+  focus-visible:outline-offset-2`.
 
 Additional standing constraints from the user, still in force:
 
