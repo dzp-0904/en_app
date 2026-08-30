@@ -602,7 +602,7 @@ known gaps.
 
 ---
 
-### M21 — `PENDING` Figma UI fidelity and UX polish
+### M21 — `24ed32b` Figma UI fidelity and UX polish
 - **Audited** (Phase A, before any edit): the Figma Make source for the shell
   (`Layout.tsx`), teacher Dashboard, ClassDetail, CreateClass and student
   Dashboard, against authentication, onboarding, all teacher screens, all
@@ -685,8 +685,8 @@ known gaps.
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `PENDING` — "feat: polish Figma UI fidelity" |
-| `origin/main` | `PENDING` — **in sync, M21 is committed and pushed** |
+| HEAD | `24ed32b` — "feat: polish Figma UI fidelity" |
+| `origin/main` | `24ed32b` — **in sync, M21 is committed and pushed** |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
 | Working tree | **clean** |
 | Routes | **20** (19 `page.tsx` + `app/auth/callback/route.ts`) |
