@@ -794,8 +794,9 @@ known gaps.
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `16bad2c` — "feat: reconstruct the full Figma UI" |
-| `origin/main` | `24ed32b` — **M22 is committed locally and NOT pushed** |
+| HEAD | `16bad2c` — "feat: reconstruct the full Figma UI", followed by the
+  memory commit that records it |
+| `origin/main` | `ad4ed65` — **M22 is committed locally and NOT pushed** |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
 | Working tree | **clean** |
 | Routes | **25** (24 `page.tsx` + `app/auth/callback/route.ts`) |
