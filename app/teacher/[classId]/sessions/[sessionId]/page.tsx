@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { AttendanceButtons } from "@/components/attendance/status-buttons";
 import { SubmitButton } from "@/components/auth/submit-button";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ATTENDANCE_LABELS, ATTENDANCE_STATUSES } from "@/lib/attendance";
 import {
   NOTE_MAX_LENGTH,
   PERFORMANCE_LABELS,
@@ -382,6 +382,11 @@ function NoteForm({
  * the control are the same object and there is nothing to keep in agreement. An
  * unmarked student says so in words, because a row of four outline buttons on
  * its own would look identical to one whose mark simply failed to render.
+ *
+ * The buttons themselves are a client component so that the press registers
+ * before the server answers — see `components/attendance/status-buttons.tsx`.
+ * The form around them is unchanged: same bound Server Action, same
+ * authorization, same no-JavaScript fallback.
  */
 function Attendee({
   attendee,
@@ -409,10 +414,6 @@ function Attendee({
         </h3>
       )}
 
-      {attendee.attendance === null ? (
-        <p className="mt-2 text-xs text-muted-foreground">Not recorded</p>
-      ) : null}
-
       <form
         action={recordAttendance.bind(
           null,
@@ -420,20 +421,8 @@ function Attendee({
           sessionId,
           attendee.membershipId,
         )}
-        className="mt-3 flex flex-wrap gap-2"
       >
-        {ATTENDANCE_STATUSES.map((status) => (
-          <Button
-            key={status}
-            type="submit"
-            name="status"
-            value={status}
-            size="sm"
-            variant={attendee.attendance === status ? "default" : "outline"}
-          >
-            {ATTENDANCE_LABELS[status]}
-          </Button>
-        ))}
+        <AttendanceButtons recorded={attendee.attendance} />
       </form>
     </>
   );

@@ -189,7 +189,11 @@ export default async function StudentClassPage({
           {lessons.map((lesson) => (
             <li key={lesson.sessionId}>
               <Card>
-                <Lesson lesson={lesson} timezone={detail.timezone} />
+                <Lesson
+                  classId={detail.classId}
+                  lesson={lesson}
+                  timezone={detail.timezone}
+                />
               </Card>
             </li>
           ))}
@@ -210,11 +214,17 @@ export default async function StudentClassPage({
  * Attendance at a lesson that did not happen is not a fact about the student,
  * and the database agrees: `v_member_session_attendance` excludes cancelled
  * sessions from the attendance rule entirely.
+ *
+ * The notes line appears only when there is something to read. Its absence is
+ * not ambiguous, because the lesson's own page — one link away, and reachable
+ * from every lesson here — says "No lesson notes yet." in words.
  */
 function Lesson({
+  classId,
   lesson,
   timezone,
 }: {
+  classId: string;
   lesson: StudentLesson;
   timezone: string;
 }) {
@@ -244,6 +254,23 @@ function Lesson({
           </span>
         </p>
       )}
+
+      {lesson.noteCount > 0 ? (
+        <p className="mt-1 text-sm text-muted-foreground">
+          Lesson notes:{" "}
+          <span className="text-foreground">
+            {lesson.noteCount === 1 ? "1 note" : `${lesson.noteCount} notes`}
+          </span>
+        </p>
+      ) : null}
+
+      {/* A plain link, like the one on `/student` — the whole card being a
+          target would swallow anything added to it later. */}
+      <Button asChild variant="outline" size="sm" className="mt-4">
+        <Link href={`/student/${classId}/sessions/${lesson.sessionId}`}>
+          Open lesson
+        </Link>
+      </Button>
     </>
   );
 }

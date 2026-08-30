@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { AttendanceStatus } from "@/lib/attendance";
+import type { Performance, Skill } from "@/lib/lesson-log";
 import type { CourseType } from "@/lib/course-type";
 import type { createClient } from "@/lib/supabase/server";
 
@@ -225,6 +226,49 @@ export type StudentLesson = {
   title: string | null;
   status: "scheduled" | "completed" | "cancelled";
   attendance: AttendanceStatus | null;
+  /**
+   * How many lesson notes this student has at this lesson.
+   *
+   * A count rather than the notes themselves: the list needs to say whether
+   * there is anything to read, and reading it is what the lesson page is for.
+   * Fetching every note's text to render the word "2" would move the whole of
+   * a term's notes through a page that shows none of them.
+   */
+  noteCount: number;
+};
+
+/**
+ * One lesson on its own page: the same facts as a list entry, without the note
+ * count, because the notes themselves are shown beneath it.
+ */
+export type StudentLessonDetail = {
+  sessionId: string;
+  startsAt: string;
+  endsAt: string;
+  title: string | null;
+  status: "scheduled" | "completed" | "cancelled";
+  attendance: AttendanceStatus | null;
+};
+
+export type StudentLessonResult =
+  | { kind: "ok"; lesson: StudentLessonDetail }
+  | { kind: "not-found" }
+  | { kind: "error" };
+
+/**
+ * One note a teacher wrote about this student at one lesson.
+ *
+ * The student's own name is deliberately absent — they are the only person
+ * these rows can be about — and so is `lesson_date`, which is the lesson's own
+ * date and already in the header of the page that shows these.
+ */
+export type StudentNote = {
+  noteId: string;
+  skill: Skill;
+  performance: Performance;
+  topic: string;
+  note: string | null;
+  createdAt: string;
 };
 
 /**
@@ -255,8 +299,9 @@ export type StudentLesson = {
  * memberships whose `student_id` is `auth.uid()`. Another student's row is not
  * filtered out of this result; it never arrives in the process at all.
  *
- * Two queries, neither of them per lesson, so this is not an N+1. `null` means
- * a query failed and is deliberately not `[]`, which means the class has no
+ * Three queries — the lessons, this student's marks, this student's notes —
+ * and not one of them is per lesson, so this is not an N+1. `null` means a
+ * query failed and is deliberately not `[]`, which means the class has no
  * lessons yet.
  */
 export async function loadStudentLessons(
@@ -299,8 +344,35 @@ export async function loadStudentLessons(
     return null;
   }
 
+  // The third and last query, and like the second it is scoped to this one
+  // membership rather than to the class. `lesson_logs_student_select` admits
+  // only `app.my_member_ids()`, so another student's notes are not filtered out
+  // afterwards — they are never returned. Only `session_id` is selected: the
+  // list is counting, not reading.
+  const { data: logs, error: logError } = await supabase
+    .from("lesson_logs")
+    .select("session_id")
+    .eq("class_id", classId)
+    .eq("class_member_id", membershipId);
+
+  if (logError) {
+    console.error("[student] failed to load lesson notes", {
+      code: logError.code,
+      message: logError.message,
+    });
+    return null;
+  }
+
   const recorded = new Map<string, AttendanceStatus>();
   for (const mark of marks ?? []) recorded.set(mark.session_id, mark.status);
+
+  // `session_id` is nullable — a note whose lesson was deleted keeps its
+  // tenancy and loses its session — and a null key simply matches no lesson.
+  const notes = new Map<string, number>();
+  for (const log of logs ?? []) {
+    if (log.session_id === null) continue;
+    notes.set(log.session_id, (notes.get(log.session_id) ?? 0) + 1);
+  }
 
   return sessions.map((session) => ({
     sessionId: session.id,
@@ -310,5 +382,134 @@ export async function loadStudentLessons(
     status: session.status,
     // Absent from the map means unmarked, which is not the same as `absent`.
     attendance: recorded.get(session.id) ?? null,
+    noteCount: notes.get(session.id) ?? 0,
+  }));
+}
+
+/**
+ * One lesson of the student's own class, with their own mark on it.
+ *
+ * The three-arm result the rest of this module uses: `not-found` for a lesson
+ * that is not this class's, `error` for a query that failed. They are never
+ * conflated — "this lesson does not exist" is a claim only an answered query
+ * may make.
+ *
+ * ## What authorises this
+ *
+ * `classId` has already been proved to be one of this student's by
+ * `loadStudentClass`, and `membershipId` came back from that same query, which
+ * was filtered by `getUser()`'s id. Neither is taken from the URL or a form.
+ * `sessionId` *is* off the URL, and it is never the only thing selecting the
+ * row: the filter is `id = sessionId` AND `class_id = classId` in one WHERE
+ * clause, so a session belonging to any other class matches nothing and is
+ * reported as a lesson that does not exist. Nothing about it is read, so
+ * nothing about it can leak — not even whether it exists.
+ *
+ * Beneath that, `class_sessions_student_select` admits only
+ * `app.my_student_class_ids()`, which is itself `join_status = 'joined'` and
+ * `removed_at is null`: a student removed from a class stops being able to read
+ * its lessons at the database, not merely in this function.
+ */
+export async function loadStudentLesson(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+  sessionId: string,
+  membershipId: string,
+): Promise<StudentLessonResult> {
+  // Before the round trip, so a mistyped link is a 404 rather than `22P02
+  // invalid input syntax for type uuid` arriving as a server fault.
+  if (!UUID.test(sessionId)) return { kind: "not-found" };
+
+  const { data: session, error: sessionError } = await supabase
+    .from("class_sessions")
+    .select("id, starts_at, ends_at, title, status")
+    .eq("id", sessionId)
+    .eq("class_id", classId)
+    .maybeSingle();
+
+  if (sessionError) {
+    console.error("[student] failed to load lesson", {
+      code: sessionError.code,
+      message: sessionError.message,
+    });
+    return { kind: "error" };
+  }
+
+  if (!session) return { kind: "not-found" };
+
+  const { data: mark, error: markError } = await supabase
+    .from("session_attendance")
+    .select("status")
+    .eq("session_id", sessionId)
+    .eq("class_id", classId)
+    .eq("class_member_id", membershipId)
+    .maybeSingle();
+
+  if (markError) {
+    console.error("[student] failed to load lesson attendance", {
+      code: markError.code,
+      message: markError.message,
+    });
+    return { kind: "error" };
+  }
+
+  return {
+    kind: "ok",
+    lesson: {
+      sessionId: session.id,
+      startsAt: session.starts_at,
+      endsAt: session.ends_at,
+      title: session.title,
+      status: session.status,
+      // No row is "not recorded", which is a state of its own.
+      attendance: mark?.status ?? null,
+    },
+  };
+}
+
+/**
+ * The lesson notes this student's teacher wrote about *them* at one lesson.
+ *
+ * One query, oldest first, filtered by the session, the class and this
+ * membership together. There may be any number of them: `lesson_logs` carries
+ * no unique constraint, so a teacher may write several about one student at one
+ * lesson, and nothing here assumes otherwise.
+ *
+ * The student is never named in the result because every row is theirs by
+ * construction. `lesson_logs_student_select` admits only `app.my_member_ids()`,
+ * so a note about a classmate cannot reach this process; the `class_member_id`
+ * filter is this query agreeing with that policy rather than adding to it.
+ *
+ * `null` means the query failed, `[]` means nothing was written.
+ */
+export async function loadStudentSessionNotes(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+  sessionId: string,
+  membershipId: string,
+): Promise<StudentNote[] | null> {
+  const { data: logs, error } = await supabase
+    .from("lesson_logs")
+    .select("id, skill, performance, topic, note, created_at")
+    .eq("session_id", sessionId)
+    .eq("class_id", classId)
+    .eq("class_member_id", membershipId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("[student] failed to load lesson notes", {
+      code: error.code,
+      message: error.message,
+    });
+    return null;
+  }
+
+  return (logs ?? []).map((log) => ({
+    noteId: log.id,
+    skill: log.skill,
+    performance: log.performance,
+    topic: log.topic,
+    note: log.note,
+    createdAt: log.created_at,
   }));
 }
