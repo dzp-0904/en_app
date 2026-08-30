@@ -96,11 +96,11 @@ export async function joinClass(formData: FormData) {
     if (error.code === "22023") {
       failTo(
         code,
-        "This invitation link is no longer valid. Ask your teacher for a new one.",
+        "Liên kết mời này không còn hiệu lực. Hãy đề nghị giáo viên gửi liên kết mới.",
       );
     }
 
-    failTo(code, "We could not add you to this class. Please try again.");
+    failTo(code, "Chúng tôi chưa thêm được bạn vào lớp này. Vui lòng thử lại.");
   }
 
   const joined = data?.[0];
@@ -123,16 +123,16 @@ export async function joinClass(formData: FormData) {
  */
 function permissionMessage(message: string): string {
   if (message.includes("only students")) {
-    return "Teacher accounts cannot join a class. Sign in with your student account to accept this invitation.";
+    return "Tài khoản giáo viên không thể tham gia lớp. Hãy đăng nhập bằng tài khoản học viên để nhận lời mời này.";
   }
 
   if (message.includes("confirmed")) {
-    return "Confirm your email address first, then open this link again.";
+    return "Hãy xác nhận địa chỉ email của bạn trước, sau đó mở lại liên kết này.";
   }
 
   if (message.includes("no email address")) {
-    return "Your account has no email address, so it cannot join a class.";
+    return "Tài khoản của bạn chưa có địa chỉ email nên không thể tham gia lớp học.";
   }
 
-  return "Your account is not allowed to join this class.";
+  return "Tài khoản của bạn không được phép tham gia lớp này.";
 }

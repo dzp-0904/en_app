@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
+import { authErrorMessage } from "@/lib/auth-messages";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -20,10 +21,11 @@ import { createClient } from "@/lib/supabase/server";
  *     anything `proxy.ts` did.
  *
  * Errors are reported by redirecting back with an `error` query parameter. That
- * keeps the pages as Server Components with no `useActionState` boundary. React
- * escapes the message when rendering it, so reflecting the provider's text is
- * safe — and more useful than a generic string, since Supabase already writes
- * these messages to avoid leaking whether an account exists.
+ * keeps the pages as Server Components with no `useActionState` boundary. The
+ * provider writes its messages in English, so they pass through
+ * `authErrorMessage` on the way to the screen — a translation only: the same
+ * failures still occur, still redirect to the same page, and the translations
+ * keep the originals' care not to leak whether an account exists.
  */
 
 /** Redirects with a message attached. Returns `never` so callers narrow. */
@@ -78,14 +80,14 @@ export async function signInWithPassword(formData: FormData) {
   const password = String(formData.get("password") ?? "");
 
   if (!email || !password) {
-    failTo("/auth/login", "Enter both your email address and your password.");
+    failTo("/auth/login", "Vui lòng nhập cả địa chỉ email và mật khẩu.");
   }
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
-    failTo("/auth/login", error.message);
+    failTo("/auth/login", authErrorMessage(error.message, "signInWithPassword"));
   }
 
   // The session cookie just changed, so any cached RSC payload rendered for the
@@ -111,7 +113,7 @@ export async function signUpWithPassword(formData: FormData) {
   const fullName = String(formData.get("full_name") ?? "").trim();
 
   if (!email || !password) {
-    failTo("/auth/signup", "Enter both your email address and a password.");
+    failTo("/auth/signup", "Vui lòng nhập cả địa chỉ email và mật khẩu.");
   }
 
   // profiles_full_name_length allows 1..120 characters. The trigger falls back
@@ -119,7 +121,7 @@ export async function signUpWithPassword(formData: FormData) {
   // acceptable; an over-long one would be silently truncated by the trigger's
   // left(v_name, 120), so it is rejected here where the user can see why.
   if (fullName.length > 120) {
-    failTo("/auth/signup", "Please use a name of 120 characters or fewer.");
+    failTo("/auth/signup", "Vui lòng dùng tên không quá 120 ký tự.");
   }
 
   const supabase = await createClient();
@@ -138,7 +140,7 @@ export async function signUpWithPassword(formData: FormData) {
   });
 
   if (error) {
-    failTo("/auth/signup", error.message);
+    failTo("/auth/signup", authErrorMessage(error.message, "signUp"));
   }
 
   // With email confirmation required — which product decision 14 mandates, and
@@ -179,11 +181,14 @@ export async function signInWithGoogle() {
   });
 
   if (error) {
-    failTo("/auth/login", error.message);
+    failTo("/auth/login", authErrorMessage(error.message, "signInWithOAuth"));
   }
 
   if (!data.url) {
-    failTo("/auth/login", "Google sign-in is unavailable. Please try again.");
+    failTo(
+      "/auth/login",
+      "Hiện không thể đăng nhập bằng Google. Vui lòng thử lại.",
+    );
   }
 
   redirect(data.url);

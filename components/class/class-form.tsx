@@ -53,8 +53,8 @@ export function ClassForm({
   action,
   defaultCourseType,
   defaults,
-  submitLabel = "Create class",
-  pendingLabel = "Creating class…",
+  submitLabel = "Tạo lớp học",
+  pendingLabel = "Đang tạo lớp học…",
 }: {
   action: (formData: FormData) => void | Promise<void>;
   /** Which option the course-type control starts on. */
@@ -66,7 +66,7 @@ export function ClassForm({
 }) {
   // `public.band` accepts anything on the half-point grid from 0 to 9, while
   // `TARGET_BANDS` offers only the seven the Figma draws. A class whose band was
-  // set outside this form would otherwise fall back to "Not set" — an
+  // set outside this form would otherwise fall back to "Chưa đặt" — an
   // untouched dropdown quietly clearing the value on save — so the stored band
   // joins the list when it is not already in it.
   const band = defaults?.targetBand?.toFixed(1) ?? "";
@@ -78,12 +78,12 @@ export function ClassForm({
   return (
     <form action={action} className="space-y-4">
       <div className="space-y-1.5">
-        <Label htmlFor="name">Class name</Label>
+        <Label htmlFor="name">Tên lớp học</Label>
         <Input
           id="name"
           name="name"
           type="text"
-          placeholder="IELTS Evening Group"
+          placeholder="Lớp IELTS buổi tối"
           defaultValue={defaults?.name}
           maxLength={200}
           required
@@ -93,9 +93,9 @@ export function ClassForm({
 
       <div className="group grid grid-cols-2 gap-3">
         <div className="hidden space-y-1.5 group-has-[option[value=ielts]:checked]:block">
-          <Label htmlFor="target_band">Target band</Label>
+          <Label htmlFor="target_band">Band mục tiêu</Label>
           <Select id="target_band" name="target_band" defaultValue={band}>
-            <option value="">Not set</option>
+            <option value="">Chưa đặt</option>
             {bands.map((value) => (
               <option key={value} value={value}>
                 {value}
@@ -105,7 +105,7 @@ export function ClassForm({
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="course_type">Course type</Label>
+          <Label htmlFor="course_type">Loại khóa học</Label>
           <Select
             id="course_type"
             name="course_type"
@@ -123,7 +123,7 @@ export function ClassForm({
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="start_date">Start date</Label>
+          <Label htmlFor="start_date">Ngày bắt đầu</Label>
           <Input
             id="start_date"
             name="start_date"
@@ -134,7 +134,7 @@ export function ClassForm({
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="end_date">End date</Label>
+          <Label htmlFor="end_date">Ngày kết thúc</Label>
           {/* Empty is meaningful: clearing this field is how a teacher makes a
               class open-ended, so it is left blank rather than defaulted. */}
           <Input
@@ -147,12 +147,12 @@ export function ClassForm({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="schedule_note">Schedule</Label>
+        <Label htmlFor="schedule_note">Lịch học</Label>
         <Input
           id="schedule_note"
           name="schedule_note"
           type="text"
-          placeholder="Tuesday & Thursday, 7:30 PM"
+          placeholder="Thứ Ba & Thứ Năm, 19:30"
           defaultValue={defaults?.scheduleNote ?? ""}
         />
       </div>

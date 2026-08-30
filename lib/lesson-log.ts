@@ -29,11 +29,11 @@ export const SKILLS = [
 ] as const satisfies readonly Skill[];
 
 export const SKILL_LABELS: Record<Skill, string> = {
-  reading: "Reading",
-  listening: "Listening",
-  writing: "Writing",
-  speaking: "Speaking",
-  general: "General",
+  reading: "Đọc",
+  listening: "Nghe",
+  writing: "Viết",
+  speaking: "Nói",
+  general: "Tổng quát",
 };
 
 export function isSkill(value: string): value is Skill {
@@ -49,10 +49,10 @@ export const PERFORMANCE_LEVELS = [
 ] as const satisfies readonly Performance[];
 
 export const PERFORMANCE_LABELS: Record<Performance, string> = {
-  excellent: "Excellent",
-  good: "Good",
-  developing: "Developing",
-  needs_attention: "Needs attention",
+  excellent: "Xuất sắc",
+  good: "Tốt",
+  developing: "Đang tiến bộ",
+  needs_attention: "Cần chú ý",
 };
 
 export function isPerformance(value: string): value is Performance {

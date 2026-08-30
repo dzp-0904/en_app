@@ -15,7 +15,7 @@ import { createClient } from "@/lib/supabase/server";
 import { loadEditableClass } from "@/lib/teacher";
 
 export const metadata: Metadata = {
-  title: "Edit class",
+  title: "Chỉnh sửa lớp",
 };
 
 /**
@@ -61,7 +61,7 @@ export default async function EditClassPage({
         {/* Not a 404: the query failed, and telling a teacher their class is
             gone when the database merely stumbled is the worse of the two. */}
         <Alert>
-          We couldn&apos;t load this class just now. Please refresh the page.
+          Chúng tôi chưa tải được lớp học này. Vui lòng tải lại trang.
         </Alert>
       </Frame>
     );
@@ -80,8 +80,8 @@ export default async function EditClassPage({
     return (
       <Frame classId={classId}>
         <Alert>
-          This class was set up with a custom course type, which this form
-          cannot edit yet.
+          Lớp này được thiết lập với loại khóa học tùy chỉnh mà biểu mẫu này
+          chưa chỉnh sửa được.
         </Alert>
       </Frame>
     );
@@ -93,7 +93,7 @@ export default async function EditClassPage({
   return (
     <Frame classId={classId}>
       <h1 className="mb-8 font-serif text-2xl leading-relaxed text-foreground">
-        Edit class
+        Chỉnh sửa lớp
       </h1>
 
       {error ? <Alert className="mb-5">{error}</Alert> : null}
@@ -113,8 +113,8 @@ export default async function EditClassPage({
             endDate: fields.endDate,
             scheduleNote: fields.scheduleNote,
           }}
-          submitLabel="Save changes"
-          pendingLabel="Saving changes…"
+          submitLabel="Lưu thay đổi"
+          pendingLabel="Đang lưu thay đổi…"
         />
       </Card>
     </Frame>
@@ -139,7 +139,7 @@ function Frame({
     <main className="flex flex-1 justify-center bg-background p-8">
       <div className="w-full max-w-lg">
         <Button asChild variant="ghost" size="inline" className="mb-6 text-sm">
-          <Link href={`/teacher/${classId}`}>← Back to class</Link>
+          <Link href={`/teacher/${classId}`}>← Quay lại lớp học</Link>
         </Button>
 
         {children}

@@ -88,12 +88,12 @@ export async function saveName(formData: FormData) {
   const fullName = String(formData.get("full_name") ?? "").trim();
 
   if (!fullName) {
-    failTo(NAME_STEP, "Enter the name your students should see.");
+    failTo(NAME_STEP, "Vui lòng nhập tên mà học viên sẽ nhìn thấy.");
   }
 
   // profiles_full_name_length allows 1..120.
   if (fullName.length > 120) {
-    failTo(NAME_STEP, "Please use a name of 120 characters or fewer.");
+    failTo(NAME_STEP, "Vui lòng dùng tên không quá 120 ký tự.");
   }
 
   const supabase = await createClient();
@@ -104,7 +104,7 @@ export async function saveName(formData: FormData) {
 
   if (error) {
     logDbError("saveName", error);
-    failTo(NAME_STEP, "We could not save your name. Please try again.");
+    failTo(NAME_STEP, "Chúng tôi chưa lưu được tên của bạn. Vui lòng thử lại.");
   }
 
   revalidatePath("/onboarding", "layout");
@@ -118,7 +118,7 @@ export async function saveTeachingType(formData: FormData) {
   const teachingType = String(formData.get("teaching_type") ?? "").trim();
 
   if (!isOfferedCourseType(teachingType)) {
-    failTo(TEACHING_TYPE_STEP, "Choose what you primarily teach.");
+    failTo(TEACHING_TYPE_STEP, "Vui lòng chọn nội dung bạn chủ yếu giảng dạy.");
   }
 
   const supabase = await createClient();
@@ -134,7 +134,7 @@ export async function saveTeachingType(formData: FormData) {
     logDbError("saveTeachingType", error);
     failTo(
       TEACHING_TYPE_STEP,
-      "We could not save your choice. Please try again.",
+      "Chúng tôi chưa lưu được lựa chọn của bạn. Vui lòng thử lại.",
     );
   }
 
@@ -238,26 +238,26 @@ function readClassFields(formData: FormData, formPath: string): ClassFields {
   const scheduleNote = String(formData.get("schedule_note") ?? "").trim();
 
   if (!name) {
-    failTo(formPath, "Give the class a name.");
+    failTo(formPath, "Vui lòng đặt tên cho lớp học.");
   }
 
   // classes_name_length allows 1..200.
   if (name.length > 200) {
-    failTo(formPath, "Please use a class name of 200 characters or fewer.");
+    failTo(formPath, "Vui lòng dùng tên lớp không quá 200 ký tự.");
   }
 
   if (!isOfferedCourseType(courseTypeRaw)) {
-    failTo(formPath, "Choose a course type.");
+    failTo(formPath, "Vui lòng chọn loại khóa học.");
   }
   const courseType = courseTypeRaw;
 
   if (!startDateRaw) {
-    failTo(formPath, "Choose a start date.");
+    failTo(formPath, "Vui lòng chọn ngày bắt đầu.");
   }
 
   const startDate = readDate(startDateRaw);
   if (!startDate) {
-    failTo(formPath, "That start date is not a real date.");
+    failTo(formPath, "Ngày bắt đầu không phải là một ngày hợp lệ.");
   }
 
   // Absent is meaningful, not missing: clearing the field is how a teacher
@@ -266,13 +266,13 @@ function readClassFields(formData: FormData, formPath: string): ClassFields {
   if (endDateRaw) {
     endDate = readDate(endDateRaw);
     if (!endDate) {
-      failTo(formPath, "That end date is not a real date.");
+      failTo(formPath, "Ngày kết thúc không phải là một ngày hợp lệ.");
     }
 
     // classes_end_after_start. Checked here so the teacher sees which field is
     // wrong instead of a constraint failure.
     if (endDate < startDate) {
-      failTo(formPath, "The end date cannot be before the start date.");
+      failTo(formPath, "Ngày kết thúc không thể trước ngày bắt đầu.");
     }
   }
 
@@ -329,7 +329,7 @@ export async function createClass(formData: FormData) {
 
   if (error || !created) {
     logDbError("classes.insert", error ?? {});
-    failTo(formPath, "We could not create the class. Please try again.");
+    failTo(formPath, "Chúng tôi chưa tạo được lớp học. Vui lòng thử lại.");
   }
 
   const code = await createInviteCode(supabase, created.id);
@@ -354,7 +354,7 @@ export async function createClass(formData: FormData) {
     // Say so rather than implying the whole step failed.
     failTo(
       INVITE_STEP,
-      "The class was created, but we could not generate its invitation link. Please try again shortly.",
+      "Lớp học đã được tạo, nhưng chúng tôi chưa tạo được liên kết mời. Vui lòng thử lại sau giây lát.",
     );
   }
 
@@ -416,7 +416,7 @@ export async function updateClass(classId: string, formData: FormData) {
 
   if (error) {
     logDbError("classes.update", error);
-    failTo(editPath, "We could not save your changes. Please try again.");
+    failTo(editPath, "Chúng tôi chưa lưu được thay đổi của bạn. Vui lòng thử lại.");
   }
 
   // Zero rows means the class is not this teacher's — or is archived, or is
@@ -494,14 +494,14 @@ export async function inviteStudentByEmail(
     .toLowerCase();
 
   if (!email) {
-    failTo(formPath, "Enter a student's email address.");
+    failTo(formPath, "Vui lòng nhập địa chỉ email của học viên.");
   }
 
   // Deliberately loose: one @, no spaces, a dot in the domain. Anything
   // stricter rejects addresses that are valid, and the real test is whether the
   // student can confirm the address at sign-up.
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
-    failTo(formPath, "That does not look like an email address.");
+    failTo(formPath, "Đây không giống một địa chỉ email.");
   }
 
   const supabase = await createClient();
@@ -518,7 +518,7 @@ export async function inviteStudentByEmail(
   if (owned.kind === "error") {
     // A failed read is not "no such class": telling a teacher their class is
     // gone when the database stumbled is the worse of the two answers.
-    failTo(formPath, "We could not load this class. Please try again.");
+    failTo(formPath, "Chúng tôi chưa tải được lớp học này. Vui lòng thử lại.");
   }
 
   // The same four rules `/join/[code]` will apply to whatever we send. A code
@@ -528,7 +528,7 @@ export async function inviteStudentByEmail(
   if (!code) {
     failTo(
       formPath,
-      "This class has no active invitation link, so we cannot invite anyone yet.",
+      "Lớp này chưa có liên kết mời nào đang hoạt động, nên chưa thể mời ai.",
     );
   }
 
@@ -545,11 +545,11 @@ export async function inviteStudentByEmail(
 
   if (existingError) {
     logDbError("class_members.select", existingError);
-    failTo(formPath, "We could not check the class list. Please try again.");
+    failTo(formPath, "Chúng tôi chưa kiểm tra được danh sách lớp. Vui lòng thử lại.");
   }
 
   if (existing?.join_status === "joined") {
-    failTo(formPath, "That student has already joined this class.");
+    failTo(formPath, "Học viên này đã tham gia lớp.");
   }
 
   let memberId = existing?.id ?? null;
@@ -572,7 +572,7 @@ export async function inviteStudentByEmail(
       logDbError("class_members.insert", insertError);
       failTo(
         formPath,
-        "We could not add that student to the class. Please try again.",
+        "Chúng tôi chưa thêm được học viên đó vào lớp. Vui lòng thử lại.",
       );
     }
 

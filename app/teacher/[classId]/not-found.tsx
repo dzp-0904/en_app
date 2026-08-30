@@ -15,15 +15,15 @@ export default function ClassNotFound() {
       <div className="w-full max-w-lg">
         <Card>
           <h1 className="mb-2 text-xl font-semibold text-foreground">
-            We couldn&apos;t find that class
+            Không tìm thấy lớp học đó
           </h1>
           <p className="mb-6 text-sm text-muted-foreground">
-            The link may be wrong, or the class may have been archived. Your own
-            classes are all listed on your home page.
+            Có thể liên kết không đúng, hoặc lớp học đã được lưu trữ. Tất cả lớp
+            học của bạn đều được liệt kê trên trang chính.
           </p>
 
           <Button asChild variant="outline">
-            <Link href="/teacher">Back to classes</Link>
+            <Link href="/teacher">Quay lại danh sách lớp</Link>
           </Button>
         </Card>
       </div>

@@ -31,9 +31,9 @@ import { signOut } from "./auth/actions";
  * flow just achieved. Anyone signed in must be named back to themselves here.
  */
 const POINTS = [
-  "Track every student's IELTS progress",
-  "Log a full lesson in under a minute",
-  "Send parents a monthly report automatically",
+  "Theo dõi tiến bộ IELTS của từng học viên",
+  "Ghi lại trọn vẹn một buổi học trong chưa đầy một phút",
+  "Tự động gửi báo cáo hằng tháng cho phụ huynh",
 ];
 
 export default async function Home() {
@@ -43,12 +43,12 @@ export default async function Home() {
     return (
       <Shell>
         <h1 className="mb-4 font-serif text-2xl leading-relaxed text-foreground">
-          Teachers who track progress clearly teach more effectively.
+          Giáo viên theo dõi tiến bộ rõ ràng sẽ dạy hiệu quả hơn.
         </h1>
 
         <p className="text-sm text-muted-foreground">
-          Designed for freelance English and IELTS teachers who care deeply about
-          student outcomes.
+          Dành cho giáo viên tiếng Anh và IELTS tự do, những người thực sự quan
+          tâm đến kết quả của học viên.
         </p>
 
         <ul className="mt-8 space-y-3">
@@ -68,10 +68,10 @@ export default async function Home() {
 
         <div className="mt-10 flex flex-col gap-3 sm:flex-row">
           <Button asChild className="sm:flex-1">
-            <Link href="/auth/signup">Create account</Link>
+            <Link href="/auth/signup">Tạo tài khoản</Link>
           </Button>
           <Button asChild variant="outline" className="sm:flex-1">
-            <Link href="/auth/login">Sign in</Link>
+            <Link href="/auth/login">Đăng nhập</Link>
           </Button>
         </div>
       </Shell>
@@ -120,27 +120,27 @@ export default async function Home() {
   return (
     <Shell>
       <h1 className="mb-4 font-serif text-2xl leading-relaxed text-foreground">
-        You&apos;re signed in.
+        Bạn đã đăng nhập.
       </h1>
 
       {/* Named rather than merely acknowledged: this is the page that has to
           answer "did the confirmation link work, and as whom?". */}
       {state.email ? (
         <p className="text-sm text-muted-foreground">
-          Signed in as{" "}
+          Đang đăng nhập bằng{" "}
           <span className="font-medium text-foreground">{state.email}</span>.
         </p>
       ) : null}
 
       <p className="mt-6 text-sm text-muted-foreground">
-        This account doesn&apos;t have access to EduTrack right now. If you were
-        invited to a class, open the invitation link your teacher sent you.
+        Tài khoản này hiện chưa có quyền truy cập EduTrack. Nếu bạn được mời vào
+        một lớp học, hãy mở liên kết lời mời mà giáo viên đã gửi cho bạn.
       </p>
 
       <div className="mt-10 flex flex-col gap-3 sm:flex-row">
         <form action={signOut} className="sm:flex-1">
           <Button type="submit" variant="outline" className="w-full">
-            Sign out
+            Đăng xuất
           </Button>
         </form>
       </div>

@@ -23,7 +23,7 @@ import { createClient } from "@/lib/supabase/server";
 import { signInWithGoogle, signInWithPassword, signOut } from "../actions";
 
 export const metadata: Metadata = {
-  title: "Sign in",
+  title: "Đăng nhập",
 };
 
 const TEXT_LINK =
@@ -38,16 +38,16 @@ const TEXT_LINK =
  * from the copy on the Figma's own sign-up panel.
  */
 const POINTS: BrandPoint[] = [
-  { label: "Track every student's IELTS progress" },
-  { label: "Log a full lesson in under a minute" },
-  { label: "Send parents a monthly report automatically" },
+  { label: "Theo dõi tiến bộ IELTS của từng học viên" },
+  { label: "Ghi lại trọn vẹn một buổi học trong chưa đầy một phút" },
+  { label: "Tự động gửi báo cáo hằng tháng cho phụ huynh" },
 ];
 
 const BRAND = (
   <BrandPanel
     quoted
-    headline="Teachers who track progress clearly teach more effectively."
-    description="Designed for freelance English and IELTS teachers who care deeply about student outcomes."
+    headline="Giáo viên theo dõi tiến bộ rõ ràng sẽ dạy hiệu quả hơn."
+    description="Dành cho giáo viên tiếng Anh và IELTS tự do, những người thực sự quan tâm đến kết quả của học viên."
     points={POINTS}
   />
 );
@@ -75,9 +75,9 @@ export default async function LoginPage({ searchParams }: PageSearchParams) {
       <AuthShell brand={BRAND}>
         <Card>
           <CardHeader>
-            <CardTitle>You&apos;re already signed in</CardTitle>
+            <CardTitle>Bạn đã đăng nhập</CardTitle>
             <CardDescription>
-              Signed in as{" "}
+              Đang đăng nhập bằng{" "}
               <span className="font-medium text-foreground">{signedInAs}</span>.
             </CardDescription>
           </CardHeader>
@@ -85,13 +85,13 @@ export default async function LoginPage({ searchParams }: PageSearchParams) {
           <CardContent className="space-y-4">
             <form action={signOut}>
               <Button type="submit" variant="outline" className="w-full">
-                Sign out
+                Đăng xuất
               </Button>
             </form>
 
             <p className="text-center text-sm text-muted-foreground">
               <Link href="/" className={TEXT_LINK}>
-                Back to EduTrack
+                Quay lại EduTrack
               </Link>
             </p>
           </CardContent>
@@ -103,9 +103,11 @@ export default async function LoginPage({ searchParams }: PageSearchParams) {
   return (
     <AuthShell brand={BRAND}>
       <div className="mb-8 space-y-1">
-        <h1 className="text-2xl font-semibold text-foreground">Welcome back</h1>
+        <h1 className="text-2xl font-semibold text-foreground">
+          Chào mừng trở lại
+        </h1>
         <p className="text-sm text-muted-foreground">
-          Sign in to your EduTrack account
+          Đăng nhập vào tài khoản EduTrack của bạn
         </p>
       </div>
 
@@ -125,7 +127,7 @@ export default async function LoginPage({ searchParams }: PageSearchParams) {
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="password">Password</Label>
+          <Label htmlFor="password">Mật khẩu</Label>
           <Input
             id="password"
             name="password"
@@ -136,21 +138,21 @@ export default async function LoginPage({ searchParams }: PageSearchParams) {
           />
         </div>
 
-        <SubmitButton pendingLabel="Signing in…" className="w-full">
-          Log in
+        <SubmitButton pendingLabel="Đang đăng nhập…" className="w-full">
+          Đăng nhập
         </SubmitButton>
       </form>
 
       <OrDivider className="my-5" />
 
       <form action={signInWithGoogle}>
-        <GoogleButton label="Continue with Google" />
+        <GoogleButton label="Tiếp tục với Google" />
       </form>
 
       <p className="mt-6 text-center text-sm text-muted-foreground">
-        Don&apos;t have an account?{" "}
+        Chưa có tài khoản?{" "}
         <Link href="/auth/signup" className={TEXT_LINK}>
-          Create account
+          Tạo tài khoản
         </Link>
       </p>
     </AuthShell>

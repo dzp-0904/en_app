@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { loadUserState } from "@/lib/onboarding";
 
 export const metadata: Metadata = {
-  title: "Your classes",
+  title: "Lớp học của bạn",
 };
 
 /**
@@ -28,9 +28,9 @@ export const metadata: Metadata = {
  * `app/student/layout.tsx` wraps this in, so they are not repeated below.
  */
 
-const JOINED = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "short",
+const JOINED = new Intl.DateTimeFormat("vi-VN", {
+  day: "2-digit",
+  month: "2-digit",
   year: "numeric",
   timeZone: "UTC",
 });
@@ -53,11 +53,11 @@ export default async function StudentPage() {
     <main className="flex flex-1 justify-center bg-background p-8">
       <div className="w-full max-w-lg">
         <h1 className="mb-10 font-serif text-2xl leading-relaxed text-foreground">
-          Welcome, {fullName}
+          Chào {fullName}
         </h1>
 
         <h2 className="mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Your classes
+          Lớp học của bạn
         </h2>
 
         {classes === null ? (
@@ -65,13 +65,13 @@ export default async function StudentPage() {
           // telling someone who has joined a class that they have not is the
           // exact bug this page was written to fix.
           <Alert>
-            We couldn&apos;t load your classes just now. Please refresh the page.
+            Chúng tôi chưa tải được lớp học của bạn. Vui lòng tải lại trang.
           </Alert>
         ) : classes.length === 0 ? (
           <Card>
             <p className="text-sm text-muted-foreground">
-              You haven&apos;t joined a class yet. When your teacher sends you an
-              invitation link, open it to join.
+              Bạn chưa tham gia lớp học nào. Khi giáo viên gửi liên kết mời,
+              hãy mở liên kết đó để tham gia.
             </p>
           </Card>
         ) : (
@@ -85,13 +85,13 @@ export default async function StudentPage() {
 
                   {entry.teacherName ? (
                     <p className="text-sm text-muted-foreground">
-                      Teacher: {entry.teacherName}
+                      Giáo viên: {entry.teacherName}
                     </p>
                   ) : null}
 
                   {entry.joinedAt ? (
                     <p className="mt-2 text-xs text-muted-foreground">
-                      Joined {JOINED.format(new Date(entry.joinedAt))}
+                      Tham gia {JOINED.format(new Date(entry.joinedAt))}
                     </p>
                   ) : null}
 
@@ -100,7 +100,7 @@ export default async function StudentPage() {
                       and a link is what a keyboard and a screen reader can
                       actually find. */}
                   <Button asChild variant="outline" size="sm" className="mt-4">
-                    <Link href={`/student/${entry.classId}`}>Open class</Link>
+                    <Link href={`/student/${entry.classId}`}>Mở lớp học</Link>
                   </Button>
                 </Card>
               </li>

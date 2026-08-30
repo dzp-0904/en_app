@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { NextRequest } from "next/server";
 
+import { authErrorMessage } from "@/lib/auth-messages";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -28,13 +29,17 @@ export async function GET(request: NextRequest) {
     searchParams.get("error_description") ?? searchParams.get("error");
 
   if (providerError) {
-    redirect(`/auth/login?error=${encodeURIComponent(providerError)}`);
+    redirect(
+      `/auth/login?error=${encodeURIComponent(
+        authErrorMessage(providerError, "callback provider error"),
+      )}`,
+    );
   }
 
   if (!code) {
     redirect(
       `/auth/login?error=${encodeURIComponent(
-        "That sign-in link is invalid or has already been used.",
+        "Liên kết đăng nhập này không hợp lệ hoặc đã được sử dụng.",
       )}`,
     );
   }
@@ -56,7 +61,11 @@ export async function GET(request: NextRequest) {
   );
 
   if (error) {
-    redirect(`/auth/login?error=${encodeURIComponent(error.message)}`);
+    redirect(
+      `/auth/login?error=${encodeURIComponent(
+        authErrorMessage(error.message, "exchangeCodeForSession"),
+      )}`,
+    );
   }
 
   revalidatePath("/", "layout");

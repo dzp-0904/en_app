@@ -47,12 +47,12 @@ import { formatZonedDate, formatZonedTime } from "@/lib/time";
  */
 
 export const metadata: Metadata = {
-  title: "Class",
+  title: "Lớp học",
 };
 
-const DATE = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "short",
+const DATE = new Intl.DateTimeFormat("vi-VN", {
+  day: "2-digit",
+  month: "2-digit",
   year: "numeric",
   timeZone: "UTC",
 });
@@ -125,10 +125,10 @@ function progressFor(bands: StudentBands): { term: string; value: string }[] {
   const facts: { term: string; value: string }[] = [];
 
   const start = formatBand(bands.startOverall);
-  if (start) facts.push({ term: "Starting", value: start });
+  if (start) facts.push({ term: "Ban đầu", value: start });
 
   const current = formatBand(bands.currentOverall);
-  if (current) facts.push({ term: "Current", value: current });
+  if (current) facts.push({ term: "Hiện tại", value: current });
 
   const skills = (
     [
@@ -144,18 +144,18 @@ function progressFor(bands: StudentBands): { term: string; value: string }[] {
     })
     .filter((part): part is string => part !== null);
 
-  if (skills.length > 0) facts.push({ term: "Skills", value: skills.join(" · ") });
+  if (skills.length > 0) facts.push({ term: "Kỹ năng", value: skills.join(" · ") });
 
   const target = formatBand(bands.targetBand);
-  if (target) facts.push({ term: "Target", value: target });
+  if (target) facts.push({ term: "Mục tiêu", value: target });
 
-  facts.push({ term: "Progress", value: MEMBER_STATUS_LABELS[bands.status] });
+  facts.push({ term: "Tiến bộ", value: MEMBER_STATUS_LABELS[bands.status] });
 
   // A calendar date in the class's zone, read as one — the same `asDate` the
   // start and end dates above go through, and no browser-local conversion.
   if (bands.currentRecordedOn) {
     facts.push({
-      term: "Updated",
+      term: "Cập nhật",
       value: DATE.format(asDate(bands.currentRecordedOn)),
     });
   }
@@ -174,21 +174,21 @@ function factsFor(detail: StudentClassDetail): { term: string; value: string }[]
     ? LABELS[detail.courseType]
     : detail.courseTypeOther;
 
-  if (course) facts.push({ term: "Course", value: course });
+  if (course) facts.push({ term: "Khóa học", value: course });
 
   if (detail.targetBand !== null) {
-    facts.push({ term: "Target", value: `IELTS ${detail.targetBand.toFixed(1)}` });
+    facts.push({ term: "Mục tiêu", value: `IELTS ${detail.targetBand.toFixed(1)}` });
   }
 
   facts.push({
-    term: "Dates",
+    term: "Thời gian",
     value: detail.endDate
       ? `${DATE.format(asDate(detail.startDate))} – ${DATE.format(asDate(detail.endDate))}`
-      : `From ${DATE.format(asDate(detail.startDate))}`,
+      : `Từ ${DATE.format(asDate(detail.startDate))}`,
   });
 
   if (detail.scheduleNote) {
-    facts.push({ term: "Schedule", value: detail.scheduleNote });
+    facts.push({ term: "Lịch học", value: detail.scheduleNote });
   }
 
   return facts;
@@ -230,7 +230,7 @@ export default async function StudentClassPage({
             gone when the database merely stumbled is the same mistake
             `StudentContext.classes` uses `null` to avoid. */}
         <Alert>
-          We couldn&apos;t load this class just now. Please refresh the page.
+          Chúng tôi chưa tải được lớp học này. Vui lòng tải lại trang.
         </Alert>
       </Frame>
     );
@@ -263,7 +263,7 @@ export default async function StudentClassPage({
 
         {detail.teacherName ? (
           <p className="text-sm text-muted-foreground">
-            Teacher:{" "}
+            Giáo viên:{" "}
             <span className="font-medium text-foreground">
               {detail.teacherName}
             </span>
@@ -285,20 +285,20 @@ export default async function StudentClassPage({
       </Card>
 
       <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        My strengths and focus
+        Điểm mạnh và nội dung cần cải thiện
       </h2>
 
       <Card>
         <div className="space-y-4">
           <Tags
-            label="Strengths"
+            label="Điểm mạnh"
             tags={detail.strengths}
-            empty="No strengths recorded yet."
+            empty="Chưa ghi nhận điểm mạnh nào."
           />
           <Tags
-            label="Focus areas"
+            label="Nội dung cần cải thiện"
             tags={detail.focusAreas}
-            empty="No focus areas recorded yet."
+            empty="Chưa ghi nhận nội dung cần cải thiện nào."
           />
         </div>
       </Card>
@@ -306,19 +306,19 @@ export default async function StudentClassPage({
       {banded ? (
         <>
           <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            My progress
+            Tiến bộ của tôi
           </h2>
 
           {bands === null ? (
             // Not "no bands": the query failed, and the two must not look alike.
             <Alert>
-              We couldn&apos;t load your progress just now. Please refresh the
-              page.
+              Chúng tôi chưa tải được tiến bộ của bạn. Vui lòng tải lại
+              trang.
             </Alert>
           ) : bands.currentOverall === null && bands.startOverall === null ? (
             <Card>
               <p className="text-sm text-muted-foreground">
-                No bands have been recorded yet.
+                Chưa ghi nhận band nào.
               </p>
             </Card>
           ) : (
@@ -341,18 +341,18 @@ export default async function StudentClassPage({
       ) : null}
 
       <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Lessons
+        Buổi học
       </h2>
 
       {lessons === null ? (
         // Not "no lessons": the query failed, and the two must not look alike.
         <Alert>
-          We couldn&apos;t load your lessons just now. Please refresh the page.
+          Chúng tôi chưa tải được buổi học của bạn. Vui lòng tải lại trang.
         </Alert>
       ) : lessons.length === 0 ? (
         <Card>
           <p className="text-sm text-muted-foreground">
-            No lessons have been recorded yet.
+            Chưa có buổi học nào được ghi nhận.
           </p>
         </Card>
       ) : (
@@ -412,15 +412,15 @@ function Lesson({
       ) : null}
 
       {lesson.status === "cancelled" ? (
-        <p className="mt-2 text-sm text-muted-foreground">Cancelled</p>
+        <p className="mt-2 text-sm text-muted-foreground">Đã hủy</p>
       ) : (
         <p className="mt-2 text-sm text-muted-foreground">
-          Attendance:{" "}
+          Điểm danh:{" "}
           <span className="text-foreground">
             {/* Null is unmarked, which is a state of its own — never `absent`,
                 and never a row invented to make the line read better. */}
             {lesson.attendance === null
-              ? "Not recorded"
+              ? "Chưa ghi nhận"
               : ATTENDANCE_LABELS[lesson.attendance]}
           </span>
         </p>
@@ -428,9 +428,9 @@ function Lesson({
 
       {lesson.noteCount > 0 ? (
         <p className="mt-1 text-sm text-muted-foreground">
-          Lesson notes:{" "}
+          Ghi chú buổi học:{" "}
           <span className="text-foreground">
-            {lesson.noteCount === 1 ? "1 note" : `${lesson.noteCount} notes`}
+            {`${lesson.noteCount} ghi chú`}
           </span>
         </p>
       ) : null}
@@ -439,7 +439,7 @@ function Lesson({
           target would swallow anything added to it later. */}
       <Button asChild variant="outline" size="sm" className="mt-4">
         <Link href={`/student/${classId}/sessions/${lesson.sessionId}`}>
-          Open lesson
+          Mở buổi học
         </Link>
       </Button>
     </>
@@ -455,7 +455,7 @@ function Frame({ children }: { children: ReactNode }) {
     <main className="flex flex-1 justify-center bg-background p-8">
       <div className="w-full max-w-lg">
         <Button asChild variant="ghost" size="inline" className="mb-6 text-sm">
-          <Link href="/student">← Back to classes</Link>
+          <Link href="/student">← Quay lại danh sách lớp</Link>
         </Button>
 
         {children}

@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
  * for anyone tabbing through. Any item may also omit `href` to sit in the trail
  * unlinked, which is what a section with no page of its own needs.
  *
- * The separators are `aria-hidden`: the `<nav aria-label="Breadcrumb">` and the
+ * The separators are `aria-hidden`: the `<nav aria-label="Đường dẫn">` and the
  * ordered list already convey the structure, and a screen reader announcing
  * "slash" between every crumb is noise.
  *
@@ -36,7 +36,7 @@ function Breadcrumb({
   return (
     <nav
       data-slot="breadcrumb"
-      aria-label="Breadcrumb"
+      aria-label="Đường dẫn"
       className={cn("text-sm", className)}
       {...props}
     >

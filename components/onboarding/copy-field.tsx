@@ -72,7 +72,7 @@ export function CopyField({ label, value }: { label: string; value: string }) {
         </code>
 
         <Button type="button" variant="outline" size="sm" onClick={copy}>
-          {state === "copied" ? "Copied!" : "Copy"}
+          {state === "copied" ? "Đã sao chép!" : "Sao chép"}
         </Button>
       </div>
 
@@ -81,9 +81,9 @@ export function CopyField({ label, value }: { label: string; value: string }) {
         aria-live="polite"
         className="mt-2 text-sm text-muted-foreground empty:hidden"
       >
-        {state === "copied" ? "Link copied to clipboard." : null}
+        {state === "copied" ? "Đã sao chép liên kết." : null}
         {state === "failed"
-          ? "Could not reach the clipboard. The link is selected — press Ctrl+C to copy it."
+          ? "Không truy cập được bộ nhớ tạm. Liên kết đã được bôi đen — nhấn Ctrl+C để sao chép."
           : null}
       </p>
     </div>

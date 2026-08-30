@@ -61,7 +61,7 @@ import {
 } from "../../actions";
 
 export const metadata: Metadata = {
-  title: "Lesson",
+  title: "Buổi học",
 };
 
 /**
@@ -106,7 +106,7 @@ export default async function SessionPage({
       <Frame classId={classId}>
         {/* Not a 404: the query failed. See the class page. */}
         <Alert>
-          We couldn&apos;t load this lesson just now. Please refresh the page.
+          Chúng tôi chưa tải được buổi học này. Vui lòng tải lại trang.
         </Alert>
       </Frame>
     );
@@ -122,7 +122,7 @@ export default async function SessionPage({
     return (
       <Frame classId={classId}>
         <Alert>
-          We couldn&apos;t load this lesson just now. Please refresh the page.
+          Chúng tôi chưa tải được buổi học này. Vui lòng tải lại trang.
         </Alert>
       </Frame>
     );
@@ -182,26 +182,26 @@ export default async function SessionPage({
       {session.status === "scheduled" ? null : (
         <p className="mt-3 text-sm text-muted-foreground">
           {session.status === "cancelled"
-            ? "This lesson was cancelled."
-            : "This lesson is marked completed."}
+            ? "Buổi học này đã bị hủy."
+            : "Buổi học này đã được đánh dấu hoàn thành."}
         </p>
       )}
 
       {error ? <Alert className="mt-6">{error}</Alert> : null}
 
       <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Attendance
+        Điểm danh
       </h2>
 
       {attendees === null ? (
         <Alert>
-          We couldn&apos;t load this class&apos;s students just now. Please
-          refresh the page.
+          Chúng tôi chưa tải được danh sách học viên của lớp này. Vui lòng
+          tải lại trang.
         </Alert>
       ) : attendees.length === 0 ? (
         <Card>
           <p className="text-sm text-muted-foreground">
-            No students are currently enrolled in this class.
+            Lớp này hiện chưa có học viên nào.
           </p>
         </Card>
       ) : (
@@ -221,18 +221,18 @@ export default async function SessionPage({
       )}
 
       <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Lesson notes
+        Ghi chú buổi học
       </h2>
 
       {notes === null ? (
         <Alert>
-          We couldn&apos;t load this lesson&apos;s notes just now. Please refresh
-          the page.
+          Chúng tôi chưa tải được ghi chú của buổi học này. Vui lòng tải lại
+          trang.
         </Alert>
       ) : notes.length === 0 ? (
         <Card>
           <p className="text-sm text-muted-foreground">
-            No notes have been added yet.
+            Chưa có ghi chú nào được thêm.
           </p>
         </Card>
       ) : (
@@ -266,20 +266,20 @@ export default async function SessionPage({
       {banded ? (
         <>
           <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Bands
+            Band điểm
           </h2>
 
           {standings === null || entries === null ? (
             <Alert>
-              We couldn&apos;t load this class&apos;s bands just now. Please
-              refresh the page.
+              Chúng tôi chưa tải được band điểm của lớp này. Vui lòng tải
+              lại trang.
             </Alert>
           ) : attendees === null ? null : (
             <>
               {attendees.length === 0 && entries.length === 0 ? (
                 <Card>
                   <p className="text-sm text-muted-foreground">
-                    No students are currently enrolled in this class.
+                    Lớp này hiện chưa có học viên nào.
                   </p>
                 </Card>
               ) : (
@@ -335,7 +335,7 @@ function Note({ note }: { note: LessonNote }) {
       <h3 className="font-semibold break-words text-foreground">{note.topic}</h3>
 
       <p className="mt-1 text-sm text-muted-foreground">
-        {note.studentName ?? "Unnamed student"} · {SKILL_LABELS[note.skill]} ·{" "}
+        {note.studentName ?? "Học viên chưa có tên"} · {SKILL_LABELS[note.skill]} ·{" "}
         {PERFORMANCE_LABELS[note.performance]}
       </p>
 
@@ -386,7 +386,7 @@ function NoteForm({
       className="space-y-4"
     >
       <div className="space-y-1.5">
-        <Label htmlFor="class_member_id">Student</Label>
+        <Label htmlFor="class_member_id">Học viên</Label>
         <Select
           id="class_member_id"
           name="class_member_id"
@@ -394,31 +394,31 @@ function NoteForm({
           required
         >
           <option value="" disabled>
-            Choose a student
+            Chọn học viên
           </option>
           {attendees.map((attendee) => (
             <option key={attendee.membershipId} value={attendee.membershipId}>
-              {attendee.name ?? attendee.email ?? "Unnamed student"}
+              {attendee.name ?? attendee.email ?? "Học viên chưa có tên"}
             </option>
           ))}
         </Select>
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="topic">Topic</Label>
+        <Label htmlFor="topic">Chủ đề</Label>
         <Input
           id="topic"
           name="topic"
           type="text"
           maxLength={TOPIC_MAX_LENGTH}
-          placeholder="What this lesson covered"
+          placeholder="Nội dung buổi học"
           required
         />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="skill">Skill</Label>
+          <Label htmlFor="skill">Kỹ năng</Label>
           <Select id="skill" name="skill" defaultValue="general" required>
             {SKILLS.map((skill) => (
               <option key={skill} value={skill}>
@@ -429,10 +429,10 @@ function NoteForm({
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="performance">Performance</Label>
+          <Label htmlFor="performance">Kết quả</Label>
           <Select id="performance" name="performance" defaultValue="" required>
             <option value="" disabled>
-              Choose
+              Chọn
             </option>
             {PERFORMANCE_LEVELS.map((level) => (
               <option key={level} value={level}>
@@ -444,19 +444,19 @@ function NoteForm({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="note">Lesson notes</Label>
+        <Label htmlFor="note">Ghi chú buổi học</Label>
         <Textarea
           id="note"
           name="note"
           rows={4}
           maxLength={NOTE_MAX_LENGTH}
-          placeholder="How the lesson went for this student"
+          placeholder="Tình hình học tập của học viên trong buổi này"
           required
         />
       </div>
 
-      <SubmitButton pendingLabel="Adding note…" className="mt-6 w-full">
-        Add note
+      <SubmitButton pendingLabel="Đang thêm ghi chú…" className="mt-6 w-full">
+        Thêm ghi chú
       </SubmitButton>
     </form>
   );
@@ -503,7 +503,7 @@ function Attendee({
         </>
       ) : (
         <h3 className="font-semibold text-foreground">
-          {attendee.email ?? "Unnamed student"}
+          {attendee.email ?? "Học viên chưa có tên"}
         </h3>
       )}
 
@@ -590,7 +590,7 @@ function BandRow({
   return (
     <>
       <h3 className="font-semibold break-words text-foreground">
-        {row.name ?? "Unnamed student"}
+        {row.name ?? "Học viên chưa có tên"}
       </h3>
 
       <Standing bands={row.bands} />
@@ -631,15 +631,15 @@ function Standing({ bands }: { bands: MemberBands | null }) {
   if (!bands || (current === null && start === null)) {
     return (
       <p className="mt-1 text-sm text-muted-foreground">
-        No bands recorded yet.
+        Chưa ghi nhận band nào.
       </p>
     );
   }
 
   const overall = [
-    start === null ? null : `Starting ${start}`,
-    current === null ? null : `Current ${current}`,
-    target === null ? null : `Target ${target}`,
+    start === null ? null : `Ban đầu ${start}`,
+    current === null ? null : `Hiện tại ${current}`,
+    target === null ? null : `Mục tiêu ${target}`,
     MEMBER_STATUS_LABELS[bands.status],
   ].filter((part): part is string => part !== null);
 
@@ -716,10 +716,10 @@ function Entry({
           )}
         >
           <SubmitButton
-            pendingLabel="Removing…"
+            pendingLabel="Đang xóa…"
             className="border border-destructive/30 bg-card px-3 py-1.5 text-xs font-medium text-destructive hover:bg-background"
           >
-            Remove
+            Xóa
           </SubmitButton>
         </form>
       </div>
@@ -770,7 +770,7 @@ function ScoreForm({
       className="space-y-4"
     >
       <div className="space-y-1.5">
-        <Label htmlFor="band-student">Student</Label>
+        <Label htmlFor="band-student">Học viên</Label>
         <Select
           id="band-student"
           name="membershipId"
@@ -778,11 +778,11 @@ function ScoreForm({
           required
         >
           <option value="" disabled>
-            Choose a student
+            Chọn học viên
           </option>
           {attendees.map((attendee) => (
             <option key={attendee.membershipId} value={attendee.membershipId}>
-              {attendee.name ?? attendee.email ?? "Unnamed student"}
+              {attendee.name ?? attendee.email ?? "Học viên chưa có tên"}
             </option>
           ))}
         </Select>
@@ -790,7 +790,7 @@ function ScoreForm({
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="band-entry">Entry</Label>
+          <Label htmlFor="band-entry">Loại đánh giá</Label>
           <Select
             id="band-entry"
             name="entryType"
@@ -815,18 +815,18 @@ function ScoreForm({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="band-note">Note</Label>
+        <Label htmlFor="band-note">Ghi chú</Label>
         <Textarea
           id="band-note"
           name="note"
           rows={3}
           maxLength={SCORE_NOTE_MAX_LENGTH}
-          placeholder="Optional — what this result reflects"
+          placeholder="Không bắt buộc — kết quả này phản ánh điều gì"
         />
       </div>
 
-      <SubmitButton pendingLabel="Recording…" className="mt-6 w-full">
-        Record bands
+      <SubmitButton pendingLabel="Đang ghi nhận…" className="mt-6 w-full">
+        Ghi nhận band
       </SubmitButton>
     </form>
   );
@@ -870,7 +870,7 @@ function Frame({
     <main className="flex flex-1 justify-center bg-background p-8">
       <div className="w-full max-w-lg">
         <Button asChild variant="ghost" size="inline" className="mb-6 text-sm">
-          <Link href={`/teacher/${classId}`}>← Back to class</Link>
+          <Link href={`/teacher/${classId}`}>← Quay lại lớp học</Link>
         </Button>
 
         {children}

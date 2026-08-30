@@ -11,7 +11,7 @@ import { loadTeacherClasses } from "@/lib/teacher";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
-  title: "Your classes",
+  title: "Lớp học của bạn",
 };
 
 /**
@@ -60,12 +60,12 @@ export default async function TeacherPage() {
         {framed ? null : <LogoMark className="mb-12" />}
 
         <h1 className="mb-10 font-serif text-2xl leading-relaxed text-foreground">
-          Welcome back, {fullName}
+          Chào mừng trở lại, {fullName}
         </h1>
 
         <div className="mb-4 flex items-baseline justify-between gap-4">
           <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Your classes
+            Lớp học của bạn
           </h2>
 
           {/* Only alongside a list. With no classes the empty state below makes
@@ -73,7 +73,7 @@ export default async function TeacherPage() {
               would give one action two buttons. */}
           {classes && classes.length > 0 ? (
             <Button asChild variant="outline" size="sm">
-              <Link href="/teacher/new">Create class</Link>
+              <Link href="/teacher/new">Tạo lớp học</Link>
             </Button>
           ) : null}
         </div>
@@ -82,15 +82,16 @@ export default async function TeacherPage() {
           // Distinct from "no classes" on purpose: the query failed, and a
           // teacher told they have none would reasonably go and make another.
           <Alert>
-            We couldn&apos;t load your classes just now. Please refresh the page.
+            Chúng tôi chưa tải được danh sách lớp học của bạn. Vui lòng tải lại
+            trang.
           </Alert>
         ) : classes.length === 0 ? (
           <Card>
             <p className="mb-5 text-sm text-muted-foreground">
-              You haven&apos;t created a class yet.
+              Bạn chưa tạo lớp học nào.
             </p>
             <Button asChild>
-              <Link href="/onboarding/class">Create your first class</Link>
+              <Link href="/onboarding/class">Tạo lớp học đầu tiên</Link>
             </Button>
           </Card>
         ) : (
@@ -103,16 +104,14 @@ export default async function TeacherPage() {
                   </h3>
 
                   <p className="text-sm text-muted-foreground">
-                    {entry.studentCount === 1
-                      ? "1 student"
-                      : `${entry.studentCount} students`}
+                    {`${entry.studentCount} học viên`}
                     {entry.pendingCount > 0
-                      ? ` · ${entry.pendingCount} pending`
+                      ? ` · ${entry.pendingCount} đang chờ`
                       : null}
                   </p>
 
                   <Button asChild variant="outline" size="sm" className="mt-4">
-                    <Link href={`/teacher/${entry.classId}`}>Open class</Link>
+                    <Link href={`/teacher/${entry.classId}`}>Mở lớp</Link>
                   </Button>
                 </Card>
               </li>

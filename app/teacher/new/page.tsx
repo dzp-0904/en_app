@@ -16,7 +16,7 @@ import type { PageSearchParams } from "@/lib/route-types";
 import { createClass } from "../../onboarding/actions";
 
 export const metadata: Metadata = {
-  title: "Create a class",
+  title: "Tạo lớp học",
 };
 
 /**
@@ -49,11 +49,11 @@ export default async function NewClassPage({ searchParams }: PageSearchParams) {
     <main className="flex flex-1 justify-center bg-background p-8">
       <div className="w-full max-w-lg">
         <Button asChild variant="ghost" size="inline" className="mb-6 text-sm">
-          <Link href="/teacher">← Back to classes</Link>
+          <Link href="/teacher">← Quay lại danh sách lớp</Link>
         </Button>
 
         <h1 className="mb-8 font-serif text-2xl leading-relaxed text-foreground">
-          Create a class
+          Tạo lớp học
         </h1>
 
         {error ? <Alert className="mb-5">{error}</Alert> : null}

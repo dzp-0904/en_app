@@ -148,26 +148,36 @@ export function zonedCalendarDate(zone: string, instant: string): string {
   return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
-/** An instant as a date in `zone` — "Tue, 1 Sep 2026". */
+/**
+ * An instant as a date in `zone` — "Thứ Ba, 01/09/2026".
+ *
+ * `vi-VN` with a numeric day and month rather than the abbreviated month the
+ * English build used: Vietnamese abbreviates September as "thg 9", which reads
+ * as a fragment beside a weekday, while `dd/MM/yyyy` is the form every
+ * Vietnamese reader already parses without thinking. The weekday is spelled out
+ * because `vi-VN` renders the short form as "Th 3", which is not obviously a day.
+ */
 export function formatZonedDate(zone: string, instant: string): string {
-  return formatterFor(zone, "date", "en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
+  return formatterFor(zone, "date", "vi-VN", {
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
     year: "numeric",
   }).format(new Date(instant));
 }
 
 /**
- * An instant as a time of day in `zone` — "7:30 PM".
+ * An instant as a time of day in `zone` — "19:30".
  *
- * `en-US` for this one alone, where every date in the app is `en-GB`: the Figma
- * writes the meridiem in capitals, and `en-GB` renders it "7:30 pm".
+ * The Figma writes "7:30 PM" because the Figma is in English. Vietnamese
+ * schedules are written on the 24-hour clock, and `vi-VN` renders a 12-hour
+ * time as "7:30 CH", which is both less familiar and no shorter. The 24-hour
+ * form is narrower than the English one, so nothing in the layout has to give.
  */
 export function formatZonedTime(zone: string, instant: string): string {
-  return formatterFor(zone, "time", "en-US", {
-    hour: "numeric",
+  return formatterFor(zone, "time", "vi-VN", {
+    hour: "2-digit",
     minute: "2-digit",
-    hour12: true,
+    hour12: false,
   }).format(new Date(instant));
 }

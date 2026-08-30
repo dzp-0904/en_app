@@ -30,14 +30,14 @@ export default async function NamePage({ searchParams }: PageSearchParams) {
   return (
     <OnboardingShell
       step={0}
-      title="What should we call you?"
-      description="Your name will appear on reports and to your students."
+      title="Chúng tôi nên gọi bạn là gì?"
+      description="Tên của bạn sẽ xuất hiện trên báo cáo và hiển thị với học viên."
     >
       {error ? <Alert className="mb-5">{error}</Alert> : null}
 
       <form action={saveName} className="space-y-4">
         <div className="space-y-1.5">
-          <Label htmlFor="full_name">Full name</Label>
+          <Label htmlFor="full_name">Họ và tên</Label>
           <Input
             id="full_name"
             name="full_name"
@@ -51,8 +51,8 @@ export default async function NamePage({ searchParams }: PageSearchParams) {
           />
         </div>
 
-        <SubmitButton pendingLabel="Saving…" className="w-full">
-          Continue
+        <SubmitButton pendingLabel="Đang lưu…" className="w-full">
+          Tiếp tục
         </SubmitButton>
       </form>
     </OnboardingShell>

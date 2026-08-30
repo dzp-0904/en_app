@@ -15,7 +15,7 @@ import { createClient } from "@/lib/supabase/server";
 import { dismissInvitation, joinClass, rememberAndAuthenticate } from "./actions";
 
 export const metadata: Metadata = {
-  title: "Join a class",
+  title: "Tham gia lớp học",
 };
 
 /**
@@ -45,16 +45,19 @@ export const metadata: Metadata = {
  * not exist is worse than saying nothing.
  */
 
-const MONTH_YEAR = new Intl.DateTimeFormat("en-GB", {
-  month: "short",
-  year: "numeric",
-  timeZone: "UTC",
-});
+/**
+ * The course range is assembled from the date's own parts rather than through
+ * `Intl`, which spells a Vietnamese month as "tháng 09, 2026" — a phrase, where
+ * this line wants a token that sits inside a range. `MM/YYYY` is what a
+ * Vietnamese reader expects of a course that runs from one month to another.
+ */
+function monthOf(date: Date): string {
+  return String(date.getUTCMonth() + 1).padStart(2, "0");
+}
 
-const MONTH = new Intl.DateTimeFormat("en-GB", {
-  month: "short",
-  timeZone: "UTC",
-});
+function monthYearOf(date: Date): string {
+  return `${monthOf(date)}/${date.getUTCFullYear()}`;
+}
 
 /** `YYYY-MM-DD` read as a calendar date, not a moment in the viewer's zone. */
 function asDate(iso: string): Date {
@@ -64,14 +67,14 @@ function asDate(iso: string): Date {
 function formatRange(start: string, end: string | null): string {
   const from = asDate(start);
 
-  if (!end) return `From ${MONTH_YEAR.format(from)}`;
+  if (!end) return `Từ ${monthYearOf(from)}`;
 
   const to = asDate(end);
 
-  // "Aug–Dec 2026" rather than "Aug 2026–Dec 2026" when the year is shared.
+  // "08–12/2026" rather than "08/2026–12/2026" when the year is shared.
   return from.getUTCFullYear() === to.getUTCFullYear()
-    ? `${MONTH.format(from)}–${MONTH_YEAR.format(to)}`
-    : `${MONTH_YEAR.format(from)}–${MONTH_YEAR.format(to)}`;
+    ? `${monthOf(from)}–${monthYearOf(to)}`
+    : `${monthYearOf(from)}–${monthYearOf(to)}`;
 }
 
 /** Monogram for the teacher avatar: first and last initial. */
@@ -122,19 +125,19 @@ export default async function JoinPage({
           </div>
 
           <h1 className="mb-2 text-xl font-semibold text-foreground">
-            You&apos;ve joined the class!
+            Bạn đã tham gia lớp học!
           </h1>
 
           <p className="mb-6 text-sm text-muted-foreground">
-            You&apos;re now enrolled in{" "}
+            Bạn đã có mặt trong lớp{" "}
             <strong className="font-semibold text-foreground">
-              {joinedClassName || "your class"}
+              {joinedClassName || "lớp học của bạn"}
             </strong>
-            {preview ? ` with ${preview.teacher_name}` : null}.
+            {preview ? ` cùng ${preview.teacher_name}` : null}.
           </p>
 
           <Button asChild>
-            <Link href="/">Continue to EduTrack</Link>
+            <Link href="/">Tiếp tục vào EduTrack</Link>
           </Button>
         </div>
       </Frame>
@@ -146,15 +149,15 @@ export default async function JoinPage({
       <Frame>
         <Card className="text-center">
           <h1 className="mb-2 text-xl font-semibold text-foreground">
-            This invitation link isn&apos;t valid
+            Liên kết mời này không hợp lệ
           </h1>
           <p className="mb-6 text-sm text-muted-foreground">
-            It may have expired, been used up, or been withdrawn. Ask your
-            teacher to send you a new link.
+            Liên kết có thể đã hết hạn, đã dùng hết lượt hoặc đã bị thu hồi. Hãy
+            đề nghị giáo viên gửi cho bạn một liên kết mới.
           </p>
 
           <Button asChild variant="outline">
-            <Link href="/">Go to EduTrack</Link>
+            <Link href="/">Đến EduTrack</Link>
           </Button>
         </Card>
       </Frame>
@@ -167,7 +170,7 @@ export default async function JoinPage({
 
   const facts = [
     preview.target_band !== null
-      ? `Target: IELTS ${preview.target_band.toFixed(1)}`
+      ? `Mục tiêu: IELTS ${preview.target_band.toFixed(1)}`
       : courseLabel,
     formatRange(preview.start_date, preview.end_date),
     preview.schedule_note,
@@ -177,7 +180,7 @@ export default async function JoinPage({
     <Frame>
       <Card className="mb-6 text-center">
         <p className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          You&apos;ve been invited to join
+          Bạn được mời tham gia
         </p>
 
         <h1 className="mb-1 text-xl font-semibold text-foreground">
@@ -192,7 +195,7 @@ export default async function JoinPage({
             {initials(preview.teacher_name)}
           </span>
           <span className="text-sm text-muted-foreground">
-            Teacher: {preview.teacher_name}
+            Giáo viên: {preview.teacher_name}
           </span>
         </div>
 
@@ -209,16 +212,16 @@ export default async function JoinPage({
         {state.kind === "anonymous" ? (
           <>
             <p className="mb-5 text-sm text-muted-foreground">
-              Create an account or log in to join. We&apos;ll bring you straight
-              back here.
+              Hãy tạo tài khoản hoặc đăng nhập để tham gia. Chúng tôi sẽ đưa bạn
+              quay lại ngay đây.
             </p>
 
             <div className="space-y-3">
               <form action={rememberAndAuthenticate}>
                 <input type="hidden" name="code" value={code} />
                 <input type="hidden" name="destination" value="signup" />
-                <SubmitButton pendingLabel="Opening…" className="w-full">
-                  Create account
+                <SubmitButton pendingLabel="Đang mở…" className="w-full">
+                  Tạo tài khoản
                 </SubmitButton>
               </form>
 
@@ -226,7 +229,7 @@ export default async function JoinPage({
                 <input type="hidden" name="code" value={code} />
                 <input type="hidden" name="destination" value="login" />
                 <Button type="submit" variant="outline" className="w-full">
-                  Log in
+                  Đăng nhập
                 </Button>
               </form>
             </div>
@@ -234,26 +237,26 @@ export default async function JoinPage({
         ) : state.kind === "teacher" ? (
           <>
             <p className="mb-5 text-sm text-muted-foreground">
-              You&apos;re signed in as a teacher. Classes are joined by students,
-              so this invitation is for a student account.
+              Bạn đang đăng nhập bằng tài khoản giáo viên. Lớp học do học viên
+              tham gia, nên lời mời này dành cho tài khoản học viên.
             </p>
 
             <Button asChild variant="outline" className="w-full">
-              <Link href="/">Go to EduTrack</Link>
+              <Link href="/">Đến EduTrack</Link>
             </Button>
           </>
         ) : (
           <div className="space-y-3">
             <form action={joinClass}>
               <input type="hidden" name="code" value={code} />
-              <SubmitButton pendingLabel="Joining…" className="w-full">
-                Join class
+              <SubmitButton pendingLabel="Đang tham gia…" className="w-full">
+                Tham gia lớp
               </SubmitButton>
             </form>
 
             <form action={dismissInvitation}>
               <Button type="submit" variant="outline" className="w-full">
-                Not now
+                Để sau
               </Button>
             </form>
           </div>

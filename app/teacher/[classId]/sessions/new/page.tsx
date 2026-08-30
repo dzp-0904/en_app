@@ -17,7 +17,7 @@ import { loadEditableClass } from "@/lib/teacher";
 import { createSession } from "../../actions";
 
 export const metadata: Metadata = {
-  title: "Create lesson",
+  title: "Tạo buổi học",
 };
 
 /**
@@ -65,7 +65,7 @@ export default async function NewSessionPage({
       <Frame classId={classId}>
         {/* Not a 404: the query failed. See the class page. */}
         <Alert>
-          We couldn&apos;t load this class just now. Please refresh the page.
+          Chúng tôi chưa tải được lớp học này. Vui lòng tải lại trang.
         </Alert>
       </Frame>
     );
@@ -79,7 +79,7 @@ export default async function NewSessionPage({
   return (
     <Frame classId={classId}>
       <h1 className="mb-2 font-serif text-2xl leading-relaxed text-foreground">
-        Create lesson
+        Tạo buổi học
       </h1>
       <p className="mb-8 text-sm text-muted-foreground">{fields.className}</p>
 
@@ -92,29 +92,29 @@ export default async function NewSessionPage({
             and re-reads the class filtered by their id regardless. */}
         <form action={createSession.bind(null, fields.classId)} className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="date">Date</Label>
+            <Label htmlFor="date">Ngày</Label>
             <Input id="date" name="date" type="date" required autoFocus />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="start_time">Starts</Label>
+              <Label htmlFor="start_time">Bắt đầu</Label>
               <Input id="start_time" name="start_time" type="time" required />
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="end_time">Ends</Label>
+              <Label htmlFor="end_time">Kết thúc</Label>
               <Input id="end_time" name="end_time" type="time" required />
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="title">Lesson title</Label>
+            <Label htmlFor="title">Tên buổi học</Label>
             <Input
               id="title"
               name="title"
               type="text"
-              placeholder="Optional"
+              placeholder="Không bắt buộc"
               maxLength={200}
             />
           </div>
@@ -122,11 +122,11 @@ export default async function NewSessionPage({
           {/* Said once, plainly, rather than repeated under both time fields:
               the two clocks are the class's own, not the reader's. */}
           <p className="text-xs text-muted-foreground">
-            Times are in this class&apos;s timezone ({fields.timezone}).
+            Giờ hiển thị theo múi giờ của lớp này ({fields.timezone}).
           </p>
 
-          <SubmitButton pendingLabel="Creating lesson…" className="mt-6 w-full">
-            Create lesson
+          <SubmitButton pendingLabel="Đang tạo buổi học…" className="mt-6 w-full">
+            Tạo buổi học
           </SubmitButton>
         </form>
       </Card>
@@ -149,7 +149,7 @@ function Frame({
     <main className="flex flex-1 justify-center bg-background p-8">
       <div className="w-full max-w-lg">
         <Button asChild variant="ghost" size="inline" className="mb-6 text-sm">
-          <Link href={`/teacher/${classId}`}>← Back to class</Link>
+          <Link href={`/teacher/${classId}`}>← Quay lại lớp học</Link>
         </Button>
 
         {children}

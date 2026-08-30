@@ -44,10 +44,10 @@ export function invitationEmail(
   // caller having sanitised its input.
   const url = escapeHtml(details.joinUrl);
 
-  const subject = "You've been invited to join a class on EduTrack";
+  const subject = "Bạn được mời tham gia một lớp học trên EduTrack";
 
   const html = `<!doctype html>
-<html lang="en">
+<html lang="vi">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -69,30 +69,30 @@ export function invitationEmail(
                 </table>
 
                 <h1 style="margin:0 0 8px 0;font-size:20px;line-height:1.35;font-weight:600;color:#1B2036;">
-                  You've been invited to join a class
+                  Bạn được mời tham gia một lớp học
                 </h1>
 
                 <p style="margin:0 0 24px 0;font-size:14px;line-height:1.6;color:#4A5170;">
-                  ${teacherName} has invited you to join <strong style="color:#1B2036;">${className}</strong> on EduTrack, where you can follow your lesson history and track your progress.
+                  ${teacherName} đã mời bạn tham gia <strong style="color:#1B2036;">${className}</strong> trên EduTrack, nơi bạn có thể xem lại các buổi học và theo dõi tiến bộ của mình.
                 </p>
 
                 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px 0;">
                   <tr>
                     <td style="background-color:#4466EE;border-radius:8px;">
-                      <a href="${url}" style="display:inline-block;padding:12px 24px;font-family:'Public Sans',Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;color:#FFFFFF;text-decoration:none;">Join class</a>
+                      <a href="${url}" style="display:inline-block;padding:12px 24px;font-family:'Public Sans',Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;color:#FFFFFF;text-decoration:none;">Tham gia lớp học</a>
                     </td>
                   </tr>
                 </table>
 
                 <p style="margin:0 0 6px 0;font-size:12px;line-height:1.5;color:#4A5170;">
-                  If the button does not work, copy this link into your browser:
+                  Nếu nút bấm không hoạt động, hãy sao chép liên kết này vào trình duyệt:
                 </p>
                 <p style="margin:0 0 24px 0;font-size:12px;line-height:1.5;word-break:break-all;">
                   <a href="${url}" style="color:#4466EE;text-decoration:none;">${url}</a>
                 </p>
 
                 <p style="margin:0;padding-top:20px;border-top:1px solid #E8E6DE;font-size:12px;line-height:1.5;color:#4A5170;">
-                  If you weren't expecting this invitation you can ignore this email — nothing will be shared with anyone unless you join.
+                  Nếu bạn không mong đợi lời mời này, bạn có thể bỏ qua email — sẽ không có thông tin nào được chia sẻ trừ khi bạn tham gia lớp.
                 </p>
 
               </td>
@@ -105,16 +105,16 @@ export function invitationEmail(
 </html>`;
 
   const text = [
-    "You've been invited to join a class on EduTrack",
+    "Bạn được mời tham gia một lớp học trên EduTrack",
     "",
-    `${details.teacherName} has invited you to join "${details.className}" on EduTrack,`,
-    "where you can follow your lesson history and track your progress.",
+    `${details.teacherName} đã mời bạn tham gia "${details.className}" trên EduTrack,`,
+    "nơi bạn có thể xem lại các buổi học và theo dõi tiến bộ của mình.",
     "",
-    "Join the class:",
+    "Tham gia lớp học:",
     details.joinUrl,
     "",
-    "If you weren't expecting this invitation you can ignore this email —",
-    "nothing will be shared with anyone unless you join.",
+    "Nếu bạn không mong đợi lời mời này, bạn có thể bỏ qua email —",
+    "sẽ không có thông tin nào được chia sẻ trừ khi bạn tham gia lớp.",
     "",
     "EduTrack",
   ].join("\n");

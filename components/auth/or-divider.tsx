@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
  * page ground, which is the only place the design uses it.
  */
 export function OrDivider({
-  label = "or",
+  label = "hoặc",
   className,
 }: {
   label?: string;

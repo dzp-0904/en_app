@@ -67,8 +67,8 @@ export default async function InvitePage({ searchParams }: PageSearchParams) {
   return (
     <OnboardingShell
       step={3}
-      title="Class created!"
-      description="Share the link below or invite students by email."
+      title="Đã tạo lớp học!"
+      description="Chia sẻ liên kết bên dưới hoặc mời học viên qua email."
       titleAdornment={
         <span
           aria-hidden="true"
@@ -81,11 +81,11 @@ export default async function InvitePage({ searchParams }: PageSearchParams) {
       {error ? <Alert className="mb-5">{error}</Alert> : null}
 
       {link ? (
-        <CopyField label="Class invitation link" value={link} />
+        <CopyField label="Liên kết mời vào lớp" value={link} />
       ) : (
         <Alert className="mb-5">
-          This class has no active invitation link yet. Refresh the page in a
-          moment, or invite students by email below.
+          Lớp này chưa có liên kết mời nào đang hoạt động. Hãy tải lại trang sau
+          giây lát, hoặc mời học viên qua email bên dưới.
         </Alert>
       )}
 
@@ -93,7 +93,7 @@ export default async function InvitePage({ searchParams }: PageSearchParams) {
         action={inviteStudentByEmail.bind(null, currentClass.id, "onboarding")}
         className="space-y-1.5"
       >
-        <Label htmlFor="email">Or invite by email</Label>
+        <Label htmlFor="email">Hoặc mời qua email</Label>
         <div className="flex items-start gap-2">
           <Input
             id="email"
@@ -104,7 +104,7 @@ export default async function InvitePage({ searchParams }: PageSearchParams) {
             className="flex-1"
             required
           />
-          <SubmitButton pendingLabel="Sending…">Send</SubmitButton>
+          <SubmitButton pendingLabel="Đang gửi…">Gửi</SubmitButton>
         </div>
       </form>
 
@@ -114,16 +114,16 @@ export default async function InvitePage({ searchParams }: PageSearchParams) {
             <li key={member.id} className="text-sm">
               {member.join_status === "joined" ? (
                 <span className="text-green">
-                  ✓ {member.invited_email} joined the class
+                  ✓ {member.invited_email} đã tham gia lớp
                 </span>
               ) : member.invite_email_sent_at ? (
                 <span className="text-green">
-                  ✓ Invitation sent to {member.invited_email}
+                  ✓ Đã gửi lời mời tới {member.invited_email}
                 </span>
               ) : (
                 <span className="text-muted-foreground">
-                  {member.invited_email} was added, but the email has not gone
-                  out — share the link with them.
+                  Đã thêm {member.invited_email}, nhưng email chưa được gửi đi —
+                  hãy chia sẻ liên kết cho họ.
                 </span>
               )}
             </li>
@@ -132,7 +132,7 @@ export default async function InvitePage({ searchParams }: PageSearchParams) {
       ) : null}
 
       <Button asChild className="mt-6 w-full">
-        <Link href="/">Continue to EduTrack</Link>
+        <Link href="/">Tiếp tục vào EduTrack</Link>
       </Button>
     </OnboardingShell>
   );

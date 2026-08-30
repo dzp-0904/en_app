@@ -10,9 +10,9 @@ import type { Database } from "./database.types";
  *   classes.course_type     enum, per class, "what this class is"
  *
  * `teaching_type` has no constraint at all, so it could hold anything. It stores
- * the slug rather than the display label because a label is copy — renaming
- * "General English" in the UI must not orphan existing rows. `LABELS` is the
- * single place the two are related.
+ * the slug rather than the display label because a label is copy — translating
+ * "General English" into Vietnamese must not orphan existing rows. `LABELS` is
+ * the single place the two are related.
  */
 
 export type CourseType = Database["public"]["Enums"]["course_type"];
@@ -36,8 +36,23 @@ export type OfferedCourseType = (typeof COURSE_TYPES)[number];
 
 export const LABELS: Record<OfferedCourseType, string> = {
   ielts: "IELTS",
-  general_english: "General English",
-  academic_english: "Academic English",
+  general_english: "Tiếng Anh tổng quát",
+  academic_english: "Tiếng Anh học thuật",
+};
+
+/**
+ * The English labels this product displayed before the UI was localised.
+ *
+ * `LABELS` used to be the only table `normaliseTeachingType` matched against, so a
+ * row written by `app.provision_teacher(uuid, 'General English')` resolved through
+ * it. Translating `LABELS` would silently stop resolving those rows, and the
+ * teacher would find their onboarding answer blank. The old spellings are kept
+ * as read-only aliases: nothing writes them, and nothing displays them.
+ */
+const ENGLISH_ALIASES: Record<string, OfferedCourseType> = {
+  ielts: "ielts",
+  "general english": "general_english",
+  "academic english": "academic_english",
 };
 
 export function isOfferedCourseType(
@@ -52,6 +67,8 @@ export function isOfferedCourseType(
  * A teacher provisioned out-of-band with `app.provision_teacher(uuid, 'IELTS')`
  * has the label stored, not the slug. Reading tolerantly means their onboarding
  * resumes with the right option pre-selected instead of appearing unanswered.
+ * Both the current Vietnamese labels and the English ones this product used
+ * before localisation are accepted, so no stored row stops resolving.
  */
 export function normaliseTeachingType(
   value: string | null | undefined,
@@ -61,11 +78,13 @@ export function normaliseTeachingType(
   const trimmed = value.trim();
   if (isOfferedCourseType(trimmed)) return trimmed;
 
+  const folded = trimmed.toLowerCase();
+
   const matched = COURSE_TYPES.find(
-    (type) => LABELS[type].toLowerCase() === trimmed.toLowerCase(),
+    (type) => LABELS[type].toLowerCase() === folded,
   );
 
-  return matched ?? null;
+  return matched ?? ENGLISH_ALIASES[folded] ?? null;
 }
 
 /**

@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import type { LayoutChildren } from "@/lib/route-types";
 
 export const metadata: Metadata = {
-  title: "Set up EduTrack",
+  title: "Thiết lập EduTrack",
 };
 
 /**

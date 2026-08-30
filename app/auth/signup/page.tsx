@@ -21,7 +21,7 @@ import type { PageSearchParams } from "@/lib/route-types";
 import { signInWithGoogle, signUpWithPassword } from "../actions";
 
 export const metadata: Metadata = {
-  title: "Create your account",
+  title: "Tạo tài khoản",
 };
 
 const TEXT_LINK =
@@ -29,17 +29,17 @@ const TEXT_LINK =
 
 const POINTS: BrandPoint[] = [
   {
-    label: "Fast lesson logging",
-    description: "Record a full lesson note in under 60 seconds.",
+    label: "Ghi chú buổi học nhanh chóng",
+    description: "Ghi lại đầy đủ ghi chú một buổi học trong chưa đến 60 giây.",
   },
   {
-    label: "Auto-generated reports",
+    label: "Báo cáo tự động",
     description:
-      "Professional monthly reports for parents — no writing needed.",
+      "Báo cáo hằng tháng chuyên nghiệp gửi phụ huynh — không cần soạn thảo.",
   },
   {
-    label: "Progress visualization",
-    description: "Clear charts showing each student's IELTS journey.",
+    label: "Trực quan hóa tiến bộ",
+    description: "Biểu đồ rõ ràng thể hiện hành trình IELTS của từng học viên.",
   },
 ];
 
@@ -50,8 +50,8 @@ const POINTS: BrandPoint[] = [
  */
 const BRAND = (
   <BrandPanel
-    headline="Start tracking student progress in minutes."
-    description="Built for independent English and IELTS teachers who want to spend less time documenting and more time teaching."
+    headline="Bắt đầu theo dõi tiến bộ của học viên chỉ trong vài phút."
+    description="Dành cho giáo viên tiếng Anh và IELTS tự do muốn dành ít thời gian ghi chép hơn và nhiều thời gian giảng dạy hơn."
     points={POINTS}
   />
 );
@@ -82,18 +82,19 @@ export default async function SignUpPage({ searchParams }: PageSearchParams) {
       <AuthShell brand={BRAND}>
         <Card>
           <CardHeader>
-            <CardTitle>Check your inbox</CardTitle>
+            <CardTitle>Kiểm tra hộp thư của bạn</CardTitle>
             <CardDescription>
-              If an account can be created for{" "}
-              <span className="font-medium text-foreground">{pending}</span>, a
-              confirmation link is on its way. Open it to finish signing in.
+              Nếu có thể tạo tài khoản cho{" "}
+              <span className="font-medium text-foreground">{pending}</span>, một
+              liên kết xác nhận đang được gửi tới. Hãy mở liên kết đó để hoàn tất
+              đăng nhập.
             </CardDescription>
           </CardHeader>
 
           <CardContent>
             <p className="text-center text-sm text-muted-foreground">
               <Link href="/auth/login" className={TEXT_LINK}>
-                Back to sign in
+                Quay lại đăng nhập
               </Link>
             </p>
           </CardContent>
@@ -106,24 +107,24 @@ export default async function SignUpPage({ searchParams }: PageSearchParams) {
     <AuthShell brand={BRAND}>
       <div className="mb-8 space-y-1">
         <h1 className="text-2xl font-semibold text-foreground">
-          Create your account
+          Tạo tài khoản
         </h1>
         <p className="text-sm text-muted-foreground">
-          Set up your free EduTrack account
+          Thiết lập tài khoản EduTrack miễn phí của bạn
         </p>
       </div>
 
       {error ? <Alert className="mb-5">{error}</Alert> : null}
 
       <form action={signInWithGoogle} className="mb-5">
-        <GoogleButton label="Sign up with Google" />
+        <GoogleButton label="Đăng ký với Google" />
       </form>
 
-      <OrDivider label="or sign up with email" className="mb-5" />
+      <OrDivider label="hoặc đăng ký bằng email" className="mb-5" />
 
       <form action={signUpWithPassword} className="space-y-4">
         <div className="space-y-1.5">
-          <Label htmlFor="full_name">Full name</Label>
+          <Label htmlFor="full_name">Họ và tên</Label>
           <Input
             id="full_name"
             name="full_name"
@@ -136,7 +137,7 @@ export default async function SignUpPage({ searchParams }: PageSearchParams) {
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="email">Email address</Label>
+          <Label htmlFor="email">Địa chỉ email</Label>
           <Input
             id="email"
             name="email"
@@ -148,27 +149,27 @@ export default async function SignUpPage({ searchParams }: PageSearchParams) {
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="password">Password</Label>
+          <Label htmlFor="password">Mật khẩu</Label>
           <Input
             id="password"
             name="password"
             type="password"
             autoComplete="new-password"
-            placeholder="Min. 8 characters"
+            placeholder="Tối thiểu 8 ký tự"
             minLength={8}
             required
           />
         </div>
 
-        <SubmitButton pendingLabel="Creating account…" className="mt-2 w-full">
-          Create account
+        <SubmitButton pendingLabel="Đang tạo tài khoản…" className="mt-2 w-full">
+          Tạo tài khoản
         </SubmitButton>
       </form>
 
       <p className="mt-5 text-center text-sm text-muted-foreground">
-        Already have an account?{" "}
+        Đã có tài khoản?{" "}
         <Link href="/auth/login" className={TEXT_LINK}>
-          Log in
+          Đăng nhập
         </Link>
       </p>
     </AuthShell>

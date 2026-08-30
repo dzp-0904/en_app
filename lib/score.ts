@@ -51,14 +51,14 @@ export const SCORE_ENTRY_TYPES = [
 /**
  * What each kind of entry is called on screen.
  *
- * "Starting band" rather than "baseline" because that is the word the schema
+ * "Band ban đầu" rather than "cơ sở" because "starting" is the word the schema
  * itself uses for it — see the comment on `score_entries` — and the word
  * `v_member_current_band` names its columns after (`start_*` / `current_*`).
  */
 export const SCORE_ENTRY_TYPE_LABELS: Record<ScoreEntryType, string> = {
-  baseline: "Starting band",
-  progress: "Progress check",
-  mock_test: "Mock test",
+  baseline: "Band ban đầu",
+  progress: "Kiểm tra tiến bộ",
+  mock_test: "Thi thử",
 };
 
 export function isScoreEntryType(value: string): value is ScoreEntryType {
@@ -67,9 +67,9 @@ export function isScoreEntryType(value: string): value is ScoreEntryType {
 
 /** `public.member_status`, as `v_member_performance_status` reports it. */
 export const MEMBER_STATUS_LABELS: Record<MemberStatus, string> = {
-  improving: "Improving",
-  stable: "Steady",
-  needs_attention: "Needs attention",
+  improving: "Đang tiến bộ",
+  stable: "Ổn định",
+  needs_attention: "Cần chú ý",
 };
 
 /**
@@ -89,11 +89,11 @@ export const BAND_SKILLS = [
 export type BandSkill = (typeof BAND_SKILLS)[number];
 
 export const BAND_FIELD_LABELS: Record<BandSkill | "overall", string> = {
-  overall: "Overall",
-  reading: "Reading",
-  listening: "Listening",
-  writing: "Writing",
-  speaking: "Speaking",
+  overall: "Tổng thể",
+  reading: "Đọc",
+  listening: "Nghe",
+  writing: "Viết",
+  speaking: "Nói",
 };
 
 /** Every band field, overall first — the order they are shown and stored in. */

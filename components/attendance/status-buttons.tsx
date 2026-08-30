@@ -35,7 +35,7 @@ import {
  * `FormData.get` returns whatever is in the form, and a value outside the enum
  * must not light a button the server is about to reject.
  *
- * The "Not recorded" line lives here rather than beside it so that the words and
+ * The "Chưa ghi nhận" line lives here rather than beside it so that the words and
  * the buttons cannot disagree during a submission.
  */
 export function AttendanceButtons({
@@ -54,7 +54,7 @@ export function AttendanceButtons({
   return (
     <>
       {shown === null ? (
-        <p className="mt-2 text-xs text-muted-foreground">Not recorded</p>
+        <p className="mt-2 text-xs text-muted-foreground">Chưa ghi nhận</p>
       ) : null}
 
       {/* `aria-busy` rather than `disabled`: a teacher marking a whole roster

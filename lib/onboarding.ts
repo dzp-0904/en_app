@@ -214,10 +214,10 @@ export async function requireTeacher(): Promise<TeacherContext> {
 }
 
 export const ONBOARDING_STEPS = [
-  { href: "/onboarding/name", label: "Your name" },
-  { href: "/onboarding/teaching-type", label: "Teaching type" },
-  { href: "/onboarding/class", label: "Create first class" },
-  { href: "/onboarding/invite", label: "Invite students" },
+  { href: "/onboarding/name", label: "Tên của bạn" },
+  { href: "/onboarding/teaching-type", label: "Nội dung giảng dạy" },
+  { href: "/onboarding/class", label: "Tạo lớp học đầu tiên" },
+  { href: "/onboarding/invite", label: "Mời học viên" },
 ] as const;
 
 export type OnboardingStepIndex = 0 | 1 | 2 | 3;

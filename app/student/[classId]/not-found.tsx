@@ -19,15 +19,15 @@ export default function ClassNotFound() {
       <div className="w-full max-w-lg">
         <Card>
           <h1 className="mb-2 text-xl font-semibold text-foreground">
-            We couldn&apos;t find that class
+            Không tìm thấy lớp học đó
           </h1>
           <p className="mb-6 text-sm text-muted-foreground">
-            The link may be wrong, or you may no longer be in this class. Your
-            own classes are all listed on your home page.
+            Có thể liên kết không đúng, hoặc bạn không còn trong lớp này nữa. Tất
+            cả lớp học của bạn đều được liệt kê trên trang chính.
           </p>
 
           <Button asChild variant="outline">
-            <Link href="/student">Back to classes</Link>
+            <Link href="/student">Quay lại danh sách lớp</Link>
           </Button>
         </Card>
       </div>

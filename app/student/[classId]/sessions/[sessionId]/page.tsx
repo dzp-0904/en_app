@@ -33,7 +33,7 @@ import {
 } from "@/lib/time";
 
 export const metadata: Metadata = {
-  title: "Lesson",
+  title: "Buổi học",
 };
 
 /**
@@ -112,7 +112,7 @@ export default async function StudentLessonPage({
             when the database merely stumbled is the mistake this whole module
             uses a three-arm result to avoid. */}
         <Alert>
-          We couldn&apos;t load this lesson just now. Please refresh the page.
+          Chúng tôi chưa tải được buổi học này. Vui lòng tải lại trang.
         </Alert>
       </Frame>
     );
@@ -135,7 +135,7 @@ export default async function StudentLessonPage({
     return (
       <Frame classId={classId}>
         <Alert>
-          We couldn&apos;t load this lesson just now. Please refresh the page.
+          Chúng tôi chưa tải được buổi học này. Vui lòng tải lại trang.
         </Alert>
       </Frame>
     );
@@ -191,12 +191,12 @@ export default async function StudentLessonPage({
 
       {lesson.status === "cancelled" ? (
         <p className="mt-3 text-sm text-muted-foreground">
-          This lesson was cancelled.
+          Buổi học này đã bị hủy.
         </p>
       ) : null}
 
       <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        My attendance
+        Điểm danh của tôi
       </h2>
 
       <Card>
@@ -206,13 +206,13 @@ export default async function StudentLessonPage({
             cancelled sessions from the attendance rule entirely. */}
         {lesson.status === "cancelled" ? (
           <p className="text-sm text-muted-foreground">
-            This lesson was cancelled.
+            Buổi học này đã bị hủy.
           </p>
         ) : lesson.attendance === null ? (
           // Never `absent`, and never a row invented to make the line read
           // better: no mark is a state of its own.
           <p className="text-sm text-muted-foreground">
-            Attendance not recorded.
+            Chưa ghi nhận điểm danh.
           </p>
         ) : (
           <p className="font-medium text-foreground">
@@ -224,19 +224,19 @@ export default async function StudentLessonPage({
       {banded ? (
         <>
           <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            My bands
+            Band điểm của tôi
           </h2>
 
           {entries === null ? (
             // Not "nothing was recorded": the query failed, and the two must
             // not look alike.
             <Alert>
-              We couldn&apos;t load your bands just now. Please refresh the page.
+              Chúng tôi chưa tải được band điểm của bạn. Vui lòng tải lại trang.
             </Alert>
           ) : entries.length === 0 ? (
             <Card>
               <p className="text-sm text-muted-foreground">
-                No bands recorded for this lesson.
+                Chưa ghi nhận band nào cho buổi học này.
               </p>
             </Card>
           ) : (
@@ -254,17 +254,17 @@ export default async function StudentLessonPage({
       ) : null}
 
       <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        My lesson notes
+        Ghi chú buổi học của tôi
       </h2>
 
       {notes === null ? (
         <Alert>
-          We couldn&apos;t load your lesson notes just now. Please refresh the
-          page.
+          Chúng tôi chưa tải được ghi chú buổi học của bạn. Vui lòng tải lại
+          trang.
         </Alert>
       ) : notes.length === 0 ? (
         <Card>
-          <p className="text-sm text-muted-foreground">No lesson notes yet.</p>
+          <p className="text-sm text-muted-foreground">Chưa có ghi chú buổi học nào.</p>
         </Card>
       ) : (
         <ul className="space-y-3">
@@ -364,7 +364,7 @@ function Frame({
     <main className="flex flex-1 justify-center bg-background p-8">
       <div className="w-full max-w-lg">
         <Button asChild variant="ghost" size="inline" className="mb-6 text-sm">
-          <Link href={`/student/${classId}`}>← Back to class</Link>
+          <Link href={`/student/${classId}`}>← Quay lại lớp học</Link>
         </Button>
 
         {children}

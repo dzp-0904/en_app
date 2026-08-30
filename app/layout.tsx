@@ -43,13 +43,13 @@ export const metadata: Metadata = {
     template: "%s · EduTrack",
   },
   description:
-    "Progress tracking and parent reporting for independent English and IELTS teachers.",
+    "Theo dõi tiến bộ và báo cáo phụ huynh dành cho giáo viên tiếng Anh và IELTS tự do.",
 };
 
 export default function RootLayout({ children }: LayoutChildren) {
   return (
     <html
-      lang="en"
+      lang="vi"
       className={`${publicSans.variable} ${lora.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">{children}</body>

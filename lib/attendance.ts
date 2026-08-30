@@ -34,10 +34,10 @@ export const ATTENDANCE_STATUSES = [
 
 /** What each status is called on screen, on both sides of the application. */
 export const ATTENDANCE_LABELS: Record<AttendanceStatus, string> = {
-  present: "Present",
-  late: "Late",
-  absent: "Absent",
-  excused: "Excused",
+  present: "Có mặt",
+  late: "Đi muộn",
+  absent: "Vắng mặt",
+  excused: "Có phép",
 };
 
 /**

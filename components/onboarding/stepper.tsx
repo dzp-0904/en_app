@@ -17,7 +17,7 @@ export function Stepper({ step }: { step: OnboardingStepIndex }) {
   return (
     <div className="mb-6 text-center">
       <p className="mb-4 text-sm text-muted-foreground">
-        Step {step + 1} of {ONBOARDING_STEPS.length}
+        Bước {step + 1} / {ONBOARDING_STEPS.length}
       </p>
 
       <ol aria-hidden="true" className="flex items-center justify-center">

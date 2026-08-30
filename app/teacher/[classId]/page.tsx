@@ -97,12 +97,12 @@ import {
  */
 
 export const metadata: Metadata = {
-  title: "Class",
+  title: "Lớp học",
 };
 
-const DATE = new Intl.DateTimeFormat("en-GB", {
-  day: "numeric",
-  month: "short",
+const DATE = new Intl.DateTimeFormat("vi-VN", {
+  day: "2-digit",
+  month: "2-digit",
   year: "numeric",
   timeZone: "UTC",
 });
@@ -116,9 +116,9 @@ function asDate(iso: string): Date {
 type Tab = "students" | "lessons" | "info";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "students", label: "Students" },
-  { id: "lessons", label: "Lessons" },
-  { id: "info", label: "Class Info" },
+  { id: "students", label: "Học viên" },
+  { id: "lessons", label: "Buổi học" },
+  { id: "info", label: "Thông tin lớp" },
 ];
 
 function isTab(value: string): value is Tab {
@@ -138,8 +138,8 @@ function isFilter(value: string): value is Filter {
  * This page's own URL carrying a different set of selectors.
  *
  * Every default is left out rather than written down, so the plain
- * `/teacher/<id>` a teacher arrives on is the same URL the "Students" tab and
- * the "All students" pill point at — one address for one view, and no growing
+ * `/teacher/<id>` a teacher arrives on is the same URL the "Học viên" tab and
+ * the "Tất cả học viên" pill point at — one address for one view, and no growing
  * tail of `?tab=students&filter=all` on the way back to where you started.
  */
 function hrefFor(
@@ -177,7 +177,7 @@ const SUGGESTION_LIST = "tag-suggestions";
 
 /** Whoever the row is about, however much of them it knows. */
 function nameOf(entry: RosterEntry): string {
-  return entry.name ?? entry.email ?? "This student";
+  return entry.name ?? entry.email ?? "Học viên này";
 }
 
 /**
@@ -266,7 +266,7 @@ export default async function TeacherClassPage({
         {/* Not a 404: the query failed, and telling a teacher their class is
             gone when the database merely stumbled is the worse of the two. */}
         <Alert>
-          We couldn&apos;t load this class just now. Please refresh the page.
+          Chúng tôi chưa tải được lớp học này. Vui lòng tải lại trang.
         </Alert>
       </Frame>
     );
@@ -349,9 +349,9 @@ export default async function TeacherClassPage({
   const notice =
     error ??
     (overview?.kind === "not-found"
-      ? "That student is no longer on this class list."
+      ? "Học viên này không còn trong danh sách lớp."
       : overview?.kind === "error"
-        ? "We couldn't load that student's overview just now. Please try again."
+        ? "Chúng tôi chưa tải được tổng quan của học viên này. Vui lòng thử lại."
         : undefined);
 
   const students = detail.roster.filter((entry) => entry.status === "joined");
@@ -374,7 +374,7 @@ export default async function TeacherClassPage({
         );
 
   const stats: { label: string; value: string }[] = [
-    { label: "Students", value: String(students.length) },
+    { label: "Học viên", value: String(students.length) },
   ];
 
   if (standing !== null) {
@@ -404,7 +404,7 @@ export default async function TeacherClassPage({
           // the place this page came from is the class list, and that is what
           // the crumb is named after. It also carries the page's old "← Back to
           // classes" link, which the trail replaces rather than drops.
-          { label: "Classes", href: "/teacher" },
+          { label: "Lớp học", href: "/teacher" },
           { label: detail.className },
         ]}
         title={detail.className}
@@ -414,12 +414,12 @@ export default async function TeacherClassPage({
         actions={
           <>
             <Button asChild variant="outline">
-              <Link href={`/teacher/${detail.classId}/edit`}>Edit class</Link>
+              <Link href={`/teacher/${detail.classId}/edit`}>Chỉnh sửa lớp</Link>
             </Button>
 
             <Button asChild>
               <Link href={hrefFor(detail.classId, { tab: "info" }, "invite")}>
-                Invite students
+                Mời học viên
               </Link>
             </Button>
           </>
@@ -430,9 +430,9 @@ export default async function TeacherClassPage({
 
       {banded && bands === null ? (
         <Alert className="mb-5">
-          We couldn&apos;t load this class&apos;s bands and progress just now.
-          The list below is still your class; please refresh the page to see
-          where everyone stands.
+          Chúng tôi chưa tải được band và tiến bộ của lớp này. Danh sách bên
+          dưới vẫn là lớp của bạn; vui lòng tải lại trang để xem tình hình của
+          từng học viên.
         </Alert>
       ) : null}
 
@@ -444,7 +444,7 @@ export default async function TeacherClassPage({
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <Tabs
-          label="Class views"
+          label="Các mục của lớp"
           // See PREFETCH in `tabs.tsx`. These three views are one class the
           // teacher is already reading, so the background render exposes
           // nothing a click a second later would not have.
@@ -461,10 +461,10 @@ export default async function TeacherClassPage({
             load — has none. */}
         {tab === "students" && standing !== null ? (
           <FilterPills
-            label="Filter students by progress"
+            label="Lọc học viên theo tiến bộ"
             items={FILTERS.map((item) => ({
               label:
-                item === "all" ? "All students" : MEMBER_STATUS_LABELS[item],
+                item === "all" ? "Tất cả học viên" : MEMBER_STATUS_LABELS[item],
               href: hrefFor(detail.classId, { filter: item }),
               current: item === filter,
             }))}
@@ -570,17 +570,17 @@ function factsFor(detail: TeacherClassDetail): Fact[] {
     : detail.courseTypeOther;
 
   if (course) {
-    facts.push({ term: "Course", value: course, summary: course });
+    facts.push({ term: "Khóa học", value: course, summary: course });
   }
 
   if (detail.targetBand !== null) {
     const band = `IELTS ${detail.targetBand.toFixed(1)}`;
-    facts.push({ term: "Target", value: band, summary: `Target: ${band}` });
+    facts.push({ term: "Mục tiêu", value: band, summary: `Mục tiêu: ${band}` });
   }
 
   if (detail.scheduleNote) {
     facts.push({
-      term: "Schedule",
+      term: "Lịch học",
       value: detail.scheduleNote,
       summary: detail.scheduleNote,
     });
@@ -592,15 +592,15 @@ function factsFor(detail: TeacherClassDetail): Fact[] {
   const end = detail.endDate ? DATE.format(asDate(detail.endDate)) : null;
 
   facts.push({
-    term: "Start date",
+    term: "Ngày bắt đầu",
     value: start,
-    summary: end ? `${start} — ${end}` : `From ${start}`,
+    summary: end ? `${start} — ${end}` : `Từ ${start}`,
   });
 
   // No `summary`: the header has already said this date, inside the range on
   // the fact above. Two rows in the grid, one phrase under the title.
   if (end) {
-    facts.push({ term: "End date", value: end });
+    facts.push({ term: "Ngày kết thúc", value: end });
   }
 
   return facts;
@@ -648,20 +648,20 @@ function Students({
 }) {
   return (
     <>
-      <Table label="Students" containerClassName="mb-6">
+      <Table label="Học viên" containerClassName="mb-6">
         <TableHeader>
           <TableRow>
-            <TableHead>Student</TableHead>
+            <TableHead>Học viên</TableHead>
             {standing !== null ? (
               <>
-                <TableHead>Current band</TableHead>
-                <TableHead>Target</TableHead>
-                <TableHead>Skills</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>Band hiện tại</TableHead>
+                <TableHead>Mục tiêu</TableHead>
+                <TableHead>Kỹ năng</TableHead>
+                <TableHead>Trạng thái</TableHead>
               </>
             ) : null}
             <TableHead>
-              <span className="sr-only">Open</span>
+              <span className="sr-only">Mở</span>
             </TableHead>
           </TableRow>
         </TableHeader>
@@ -678,8 +678,8 @@ function Students({
                 className="p-12 text-center text-muted-foreground"
               >
                 {rosterTotal === 0
-                  ? "Nobody has joined yet. Share the invitation link from Class Info."
-                  : "No students in this category."}
+                  ? "Chưa có ai tham gia. Hãy chia sẻ liên kết mời trong mục Thông tin lớp."
+                  : "Không có học viên nào trong mục này."}
               </TableCell>
             </TableRow>
           ) : null}
@@ -718,13 +718,13 @@ function Students({
                     <TableCell className="font-semibold whitespace-nowrap">
                       {formatBand(bands?.currentOverall ?? null) ?? (
                         <span className="font-normal text-muted-foreground">
-                          Not recorded
+                          Chưa ghi nhận
                         </span>
                       )}
                     </TableCell>
 
                     <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {formatBand(entry.targetBand) ?? "Not set"}
+                      {formatBand(entry.targetBand) ?? "Chưa đặt"}
                     </TableCell>
 
                     <TableCell>
@@ -753,7 +753,7 @@ function Students({
                     )}
                     className="rounded-sm text-xs font-medium text-primary outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                   >
-                    View<span className="sr-only"> {nameOf(entry)}</span>{" "}
+                    Xem<span className="sr-only"> {nameOf(entry)}</span>{" "}
                     <span aria-hidden>→</span>
                   </Link>
                 </TableCell>
@@ -777,16 +777,16 @@ function Students({
       {pending.length > 0 ? (
         <>
           <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Pending invitations ({pending.length})
+            Lời mời đang chờ ({pending.length})
           </h2>
 
-          <Table label="Pending invitations">
+          <Table label="Lời mời đang chờ">
             <TableHeader>
               <TableRow>
-                <TableHead>Student</TableHead>
-                <TableHead>Invitation</TableHead>
+                <TableHead>Học viên</TableHead>
+                <TableHead>Lời mời</TableHead>
                 <TableHead>
-                  <span className="sr-only">Actions</span>
+                  <span className="sr-only">Thao tác</span>
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -815,8 +815,8 @@ function Students({
                       happen. */}
                   <TableCell className="text-muted-foreground">
                     {entry.inviteEmailSentAt
-                      ? `Sent ${DATE.format(new Date(entry.inviteEmailSentAt))}`
-                      : "Added, but the invitation email has not gone out — share the link with them."}
+                      ? `Đã gửi ${DATE.format(new Date(entry.inviteEmailSentAt))}`
+                      : "Đã thêm, nhưng email mời chưa được gửi đi — hãy chia sẻ liên kết cho họ."}
                   </TableCell>
 
                   <TableCell>
@@ -834,16 +834,16 @@ function Students({
                           )}
                         >
                           <Button type="submit" variant="outline" size="sm">
-                            Resend invitation
+                            Gửi lại lời mời
                           </Button>
                         </form>
                       ) : null}
 
                       <Confirm
-                        label="Cancel invitation"
-                        prompt={`${nameOf(entry)} will be taken off this class list. You can invite them again afterwards.`}
-                        confirmLabel="Cancel invitation"
-                        pendingLabel="Cancelling…"
+                        label="Hủy lời mời"
+                        prompt={`${nameOf(entry)} sẽ được gỡ khỏi danh sách lớp này. Bạn có thể mời lại họ sau.`}
+                        confirmLabel="Hủy lời mời"
+                        pendingLabel="Đang hủy…"
                         action={cancelInvitation.bind(
                           null,
                           classId,
@@ -887,7 +887,7 @@ function Skills({ bands }: { bands: MemberBands | null }) {
   }).filter((row) => row.band !== null);
 
   if (rows.length === 0) {
-    return <span className="text-muted-foreground">Not recorded</span>;
+    return <span className="text-muted-foreground">Chưa ghi nhận</span>;
   }
 
   return (
@@ -950,14 +950,14 @@ function ClassInfo({
 
       <div id="invite" className="mt-6 border-t border-border pt-6">
         <h2 className="mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Invite students
+          Mời học viên
         </h2>
 
         {link ? (
           <>
-            <CopyField label="Class invitation link" value={link} />
+            <CopyField label="Liên kết mời vào lớp" value={link} />
             <p className="-mt-1 mb-6 text-sm text-muted-foreground">
-              Anyone with this link can join this class.
+              Bất kỳ ai có liên kết này đều có thể tham gia lớp.
             </p>
 
             {/* The same action the wizard's last step uses, bound to the class
@@ -971,7 +971,7 @@ function ClassInfo({
               action={inviteStudentByEmail.bind(null, classId, "class")}
               className="space-y-1.5"
             >
-              <Label htmlFor="email">Or invite by email</Label>
+              <Label htmlFor="email">Hoặc mời qua email</Label>
               <div className="flex flex-wrap items-start gap-2">
                 <Input
                   id="email"
@@ -982,7 +982,7 @@ function ClassInfo({
                   className="min-w-0 grow basis-48"
                   required
                 />
-                <SubmitButton pendingLabel="Sending…">Send</SubmitButton>
+                <SubmitButton pendingLabel="Đang gửi…">Gửi</SubmitButton>
               </div>
             </form>
           </>
@@ -990,8 +990,8 @@ function ClassInfo({
           // No email form either: the invitation email carries the link, so
           // with no usable code there is nothing to send.
           <p className="text-sm text-muted-foreground">
-            This class has no active invitation link right now. Refresh the page
-            in a moment to check again.
+            Lớp này hiện chưa có liên kết mời nào đang hoạt động. Hãy tải lại
+            trang sau giây lát để kiểm tra.
           </p>
         )}
       </div>
@@ -1022,22 +1022,22 @@ function Lessons({
     <>
       {sessions === null ? (
         <Alert>
-          We couldn&apos;t load this class&apos;s lessons just now. Please
-          refresh the page.
+          Chúng tôi chưa tải được các buổi học của lớp này. Vui lòng tải lại
+          trang.
         </Alert>
       ) : sessions.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
-          No lessons have been recorded yet.
+          Chưa có buổi học nào được ghi nhận.
         </div>
       ) : (
-        <Table label="Lessons">
+        <Table label="Buổi học">
           <TableHeader>
             <TableRow>
-              <TableHead>Date</TableHead>
-              <TableHead>Time</TableHead>
-              <TableHead>Lesson</TableHead>
+              <TableHead>Ngày</TableHead>
+              <TableHead>Giờ</TableHead>
+              <TableHead>Buổi học</TableHead>
               <TableHead>
-                <span className="sr-only">Open</span>
+                <span className="sr-only">Mở</span>
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -1066,7 +1066,7 @@ function Lessons({
                         something to be called, and so renumbers if a lesson is
                         later inserted between two others. */}
                     <span className="break-words">
-                      {session.title ?? `Lesson ${index + 1}`}
+                      {session.title ?? `Buổi ${index + 1}`}
                     </span>
 
                     {/* Everything this page creates is `scheduled`, the
@@ -1074,9 +1074,9 @@ function Lessons({
                         noise. The other two states can only arrive from
                         elsewhere, and hiding them would misreport the class. */}
                     {session.status === "cancelled" ? (
-                      <Badge tone="destructive">Cancelled</Badge>
+                      <Badge tone="destructive">Đã hủy</Badge>
                     ) : session.status === "completed" ? (
-                      <Badge tone="green">Completed</Badge>
+                      <Badge tone="green">Đã hoàn thành</Badge>
                     ) : null}
                   </div>
                 </TableCell>
@@ -1089,10 +1089,10 @@ function Lessons({
                     href={`/teacher/${classId}/sessions/${session.sessionId}`}
                     className="rounded-sm text-xs font-medium text-primary outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                   >
-                    Open
+                    Mở
                     <span className="sr-only">
                       {" "}
-                      {session.title ?? `lesson ${index + 1}`}
+                      {session.title ?? `buổi ${index + 1}`}
                     </span>{" "}
                     <span aria-hidden>→</span>
                   </Link>
@@ -1107,7 +1107,7 @@ function Lessons({
           list could be read has no bearing on whether a lesson can be added. */}
       <div className="mt-4">
         <Button asChild variant="outline" size="sm">
-          <Link href={`/teacher/${classId}/sessions/new`}>Create lesson</Link>
+          <Link href={`/teacher/${classId}/sessions/new`}>Tạo buổi học</Link>
         </Button>
       </div>
     </>
@@ -1176,7 +1176,7 @@ function StudentPanel({
   return (
     <section
       id={PANEL_ANCHOR}
-      aria-label={`${nameOf(entry)} — overview`}
+      aria-label={`Tổng quan về ${nameOf(entry)}`}
       className="mb-6 min-w-0 space-y-5"
     >
       {/* One list for every tag input below. A datalist is a suggestion and not
@@ -1218,7 +1218,7 @@ function StudentPanel({
 
               <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
                 {entry.joinedAt ? (
-                  <span>Joined {DATE.format(new Date(entry.joinedAt))}</span>
+                  <span>Tham gia {DATE.format(new Date(entry.joinedAt))}</span>
                 ) : null}
                 {/* Beside the name because the Figma has no home for it — its
                     own header carries an exam date instead, which EduTrack does
@@ -1235,7 +1235,7 @@ function StudentPanel({
 
           <Button asChild variant="outline" size="sm">
             <Link href={hrefFor(classId, { filter }, anchorFor(entry))}>
-              Close
+              Đóng
             </Link>
           </Button>
         </div>
@@ -1263,13 +1263,13 @@ function StudentPanel({
 
       <div className="min-w-0 rounded-xl border border-border bg-card p-5">
         <h3 className="text-sm font-semibold text-foreground">
-          Remove from class
+          Xóa khỏi lớp
         </h3>
         <Confirm
-          label="Remove student"
-          prompt={`${nameOf(entry)} will be taken off this class list. Their account and any other classes they are in are not affected.`}
-          confirmLabel="Remove student"
-          pendingLabel="Removing…"
+          label="Xóa học viên khỏi lớp"
+          prompt={`${nameOf(entry)} sẽ được gỡ khỏi danh sách lớp này. Tài khoản của họ và các lớp khác họ đang tham gia không bị ảnh hưởng.`}
+          confirmLabel="Xóa học viên khỏi lớp"
+          pendingLabel="Đang xóa…"
           action={removeStudent.bind(null, classId, entry.membershipId)}
         />
       </div>
@@ -1311,19 +1311,19 @@ function Journey({ bands }: { bands: StudentOverview["bands"] }) {
   return (
     <div className="mt-6 min-w-0 rounded-xl bg-background p-4">
       {unassessed ? (
-        <Empty>No bands have been recorded yet.</Empty>
+        <Empty>Chưa có band nào được ghi nhận.</Empty>
       ) : (
         <div className="flex min-w-0 flex-wrap items-end gap-x-6 gap-y-4">
           <Milestone
-            term="Starting"
+            term="Ban đầu"
             band={bands.startOverall}
-            empty="Not recorded"
+            empty="Chưa ghi nhận"
             className="text-muted-foreground"
           />
           <Milestone
-            term="Current"
+            term="Hiện tại"
             band={bands.currentOverall}
-            empty="Not recorded"
+            empty="Chưa ghi nhận"
             className="text-primary"
           />
           {/* Decorative: the two words either side already say which way this
@@ -1334,15 +1334,15 @@ function Journey({ bands }: { bands: StudentOverview["bands"] }) {
           {/* `--green-dark`, not the Figma's #3BA876, which is 2.75:1 on this
               strip and fails even the large-text floor. The M18 substitution. */}
           <Milestone
-            term="Target"
+            term="Mục tiêu"
             band={bands.targetBand}
-            empty="Not set"
+            empty="Chưa đặt"
             className="text-green-dark"
           />
 
           {bands.currentRecordedOn ? (
             <p className="pb-1.5 text-xs text-muted-foreground sm:ml-auto">
-              Current band recorded{" "}
+              Band hiện tại ghi nhận ngày{" "}
               {DATE.format(asDate(bands.currentRecordedOn))}
             </p>
           ) : null}
@@ -1417,7 +1417,7 @@ function SkillCards({ bands }: { bands: StudentOverview["bands"] }) {
 
             {bands.targetBand === null ? null : (
               <p className="mt-1.5 text-[10px] text-muted-foreground">
-                Target {formatBand(bands.targetBand)}
+                Mục tiêu {formatBand(bands.targetBand)}
               </p>
             )}
           </div>
@@ -1430,7 +1430,7 @@ function SkillCards({ bands }: { bands: StudentOverview["bands"] }) {
 /** One skill's band and its bar, or the fact that it has neither. */
 function SkillValue({ band }: { band: number | null }) {
   if (band === null) {
-    return <p className="text-sm text-muted-foreground">Not recorded</p>;
+    return <p className="text-sm text-muted-foreground">Chưa ghi nhận</p>;
   }
 
   return (
@@ -1462,9 +1462,9 @@ function SkillValue({ band }: { band: number | null }) {
  */
 function ScoreHistory({ scores }: { scores: StudentOverview["scores"] }) {
   return (
-    <Card title="Score history">
+    <Card title="Lịch sử điểm">
       {scores.length === 0 ? (
-        <Empty>No score entries yet.</Empty>
+        <Empty>Chưa có mục điểm nào.</Empty>
       ) : (
         <ul className="min-w-0 space-y-3">
           {scores.map((score) => (
@@ -1521,9 +1521,9 @@ function AttendanceList({
   timezone: string;
 }) {
   return (
-    <Card title="Attendance">
+    <Card title="Điểm danh">
       {marks.length === 0 ? (
-        <Empty>No attendance recorded yet.</Empty>
+        <Empty>Chưa ghi nhận điểm danh nào.</Empty>
       ) : (
         <ul className="min-w-0 space-y-3">
           {marks.map((mark) => (
@@ -1579,17 +1579,19 @@ function LessonNotes({ notes }: { notes: StudentOverview["notes"] }) {
   return (
     <div className="min-w-0">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-foreground">Lesson notes</h3>
+        <h3 className="text-sm font-semibold text-foreground">
+          Ghi chú buổi học
+        </h3>
         {notes.length > 0 ? (
           <p className="text-sm text-muted-foreground">
-            {notes.length} {notes.length === 1 ? "note" : "notes"}
+            {notes.length} ghi chú
           </p>
         ) : null}
       </div>
 
       {notes.length === 0 ? (
         <p className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
-          No lesson notes yet.
+          Chưa có ghi chú buổi học nào.
         </p>
       ) : (
         <div className="min-w-0 space-y-3">
@@ -1620,7 +1622,7 @@ function LessonNotes({ notes }: { notes: StudentOverview["notes"] }) {
               {note.note ? (
                 <div className="mt-3 min-w-0 rounded-lg bg-background p-3">
                   <p className="text-xs font-medium text-muted-foreground">
-                    Teacher note
+                    Ghi chú của giáo viên
                   </p>
                   <p className="mt-1 text-sm break-words text-foreground italic">
                     {note.note}
@@ -1673,10 +1675,10 @@ function TargetBand({
 
   return (
     <div className="min-w-0 rounded-xl border border-border bg-card p-5">
-      <h3 className="text-sm font-semibold text-foreground">Target band</h3>
+      <h3 className="text-sm font-semibold text-foreground">Band mục tiêu</h3>
 
       {saved === null ? (
-        <p className="mt-2 text-sm text-muted-foreground">Not set</p>
+        <p className="mt-2 text-sm text-muted-foreground">Chưa đặt</p>
       ) : (
         <p className="mt-2 text-2xl font-bold text-green-dark">{saved}</p>
       )}
@@ -1690,7 +1692,7 @@ function TargetBand({
         {/* The heading names the control on screen; this names it to a screen
             reader, which does not read a sibling heading as a label. */}
         <label htmlFor={field} className="sr-only">
-          Target band
+          Band mục tiêu
         </label>
 
         <select
@@ -1699,7 +1701,7 @@ function TargetBand({
           defaultValue={saved ?? ""}
           className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
         >
-          <option value="">Not set</option>
+          <option value="">Chưa đặt</option>
           {BAND_VALUES.map((band) => (
             <option key={band} value={band}>
               {band}
@@ -1707,7 +1709,7 @@ function TargetBand({
           ))}
         </select>
 
-        <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
+        <SubmitButton pendingLabel="Đang lưu…">Lưu</SubmitButton>
       </form>
     </div>
   );
@@ -1746,35 +1748,35 @@ function Standing({ entry, classId }: { entry: RosterEntry; classId: string }) {
     <div className="min-w-0 rounded-xl border border-border bg-card p-5">
       <form action={saveStandingNotes.bind(null, classId, entry.membershipId)}>
         <h3 className="text-sm font-semibold text-foreground">
-          Strengths and focus areas
+          Điểm mạnh và nội dung cần cải thiện
         </h3>
 
         <TagEditor
           key={`s:${entry.strengths.join("\u0000")}`}
-          label="Strengths"
-          hint="What this student does well"
+          label="Điểm mạnh"
+          hint="Học viên này làm tốt điều gì"
           name="strengths"
           addName="addStrength"
           saved={entry.strengths}
-          empty="No strengths recorded yet."
+          empty="Chưa ghi nhận điểm mạnh nào."
           listId={SUGGESTION_LIST}
           tone="green"
         />
 
         <TagEditor
           key={`f:${entry.focusAreas.join("\u0000")}`}
-          label="Focus areas"
-          hint="What needs improvement"
+          label="Nội dung cần cải thiện"
+          hint="Điều gì cần cải thiện"
           name="focusAreas"
           addName="addFocusArea"
           saved={entry.focusAreas}
-          empty="No focus areas recorded yet."
+          empty="Chưa ghi nhận nội dung cần cải thiện nào."
           listId={SUGGESTION_LIST}
           tone="orange"
         />
 
         <div className="mt-4">
-          <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
+          <SubmitButton pendingLabel="Đang lưu…">Lưu</SubmitButton>
         </div>
       </form>
     </div>
@@ -1849,7 +1851,7 @@ function Confirm({
     <details className="group mt-3 min-w-0">
       <summary className="inline-flex cursor-pointer list-none items-center text-sm font-medium text-destructive hover:underline [&::-webkit-details-marker]:hidden">
         <span className="group-open:hidden">{label}</span>
-        <span className="hidden group-open:inline">Never mind</span>
+        <span className="hidden group-open:inline">Không, giữ lại</span>
       </summary>
 
       <div className="mt-3 rounded-lg border border-destructive/25 bg-destructive-light p-3.5">
@@ -1877,7 +1879,7 @@ function Frame({ children }: { children: ReactNode }) {
     <PageShell width="5xl">
       <Breadcrumb
         className="mb-6"
-        items={[{ label: "Classes", href: "/teacher" }, { label: "Class" }]}
+        items={[{ label: "Lớp học", href: "/teacher" }, { label: "Lớp học" }]}
       />
       {children}
     </PageShell>

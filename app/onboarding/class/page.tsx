@@ -27,8 +27,8 @@ export default async function ClassPage({ searchParams }: PageSearchParams) {
   return (
     <OnboardingShell
       step={2}
-      title="Create your first class"
-      description="You can always edit this later or add more classes."
+      title="Tạo lớp học đầu tiên"
+      description="Bạn luôn có thể chỉnh sửa sau hoặc thêm lớp học khác."
     >
       {error ? <Alert className="mb-5">{error}</Alert> : null}
 

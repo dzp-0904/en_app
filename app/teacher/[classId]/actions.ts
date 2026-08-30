@@ -138,7 +138,7 @@ async function authoriseClass(
 
   if (owned.kind === "error") {
     // A failed read is not "no such class". See `updateClass`.
-    failTo(failPath, "We could not load this class. Please try again.");
+    failTo(failPath, "Chúng tôi chưa tải được lớp học này. Vui lòng thử lại.");
   }
 
   return { supabase, teacherId: teacher.userId, fields: owned.fields };
@@ -165,7 +165,7 @@ async function authoriseRoster(
   const { supabase, fields } = await authoriseClass(classId, classPath);
 
   if (!isUuid(membershipId)) {
-    failTo(classPath, "That person is no longer on this class list.");
+    failTo(classPath, "Người này không còn trong danh sách lớp.");
   }
 
   return { supabase, fields, classPath };
@@ -206,7 +206,7 @@ async function softRemove(
 
   if (error) {
     logDbError("class_members.update(removed_at)", error);
-    failTo(classPath, "We could not update this class list. Please try again.");
+    failTo(classPath, "Chúng tôi chưa cập nhật được danh sách lớp. Vui lòng thử lại.");
   }
 
   if (!data || data.length === 0) {
@@ -254,11 +254,11 @@ export async function setTargetBand(
   // application does not, for the same reason the session page hides the bands
   // section there: a band is meaningless where nothing is scored on one.
   if (!isBandScored(fields.courseType)) {
-    failTo(classPath, "This class does not use IELTS band targets.");
+    failTo(classPath, "Lớp này không sử dụng band mục tiêu IELTS.");
   }
 
   if (!formData.has("targetBand")) {
-    failTo(classPath, "We could not save that target band. Please try again.");
+    failTo(classPath, "Chúng tôi chưa lưu được band mục tiêu. Vui lòng thử lại.");
   }
 
   const submitted = readText(formData, "targetBand");
@@ -270,7 +270,7 @@ export async function setTargetBand(
   if (!parsed.ok) {
     failTo(
       classPath,
-      "A target band must be a half point between 0.0 and 9.0. Please check the value.",
+      "Band mục tiêu phải là bội số của 0,5 trong khoảng từ 0.0 đến 9.0. Vui lòng kiểm tra lại.",
     );
   }
 
@@ -289,11 +289,11 @@ export async function setTargetBand(
 
   if (error) {
     logDbError("class_members.update(target_band)", error);
-    failTo(classPath, "We could not save that target band. Please try again.");
+    failTo(classPath, "Chúng tôi chưa lưu được band mục tiêu. Vui lòng thử lại.");
   }
 
   if (!data || data.length === 0) {
-    failTo(classPath, "That student is no longer on this class list.");
+    failTo(classPath, "Học viên này không còn trong danh sách lớp.");
   }
 
   // The roster is what changed, but the student's own progress panel reads the
@@ -339,15 +339,15 @@ function describeRejection(result: TagsResult, noun: string): string {
 
   switch (result.rejection.kind) {
     case "blank":
-      return `A ${noun} cannot be blank. Please type something or remove it.`;
+      return `Mục ${noun} không được để trống. Vui lòng nhập nội dung hoặc xóa mục đó.`;
     case "too-long":
-      return `A ${noun} must be ${MAX_TAG_LENGTH} characters or fewer.`;
+      return `Mỗi ${noun} không được dài quá ${MAX_TAG_LENGTH} ký tự.`;
     case "duplicate":
-      return `"${result.rejection.value}" is already listed under ${noun}s.`;
+      return `"${result.rejection.value}" đã có trong danh sách ${noun}.`;
     case "too-many":
-      return `You can record up to ${MAX_TAGS} ${noun}s for one student.`;
+      return `Mỗi học viên chỉ ghi nhận tối đa ${MAX_TAGS} ${noun}.`;
     case "shape":
-      return `We could not save those ${noun}s. Please try again.`;
+      return `Chúng tôi chưa lưu được danh sách ${noun}. Vui lòng thử lại.`;
   }
 }
 
@@ -384,13 +384,13 @@ export async function saveStandingNotes(
   const strengths = readSubmittedTags(formData, "strengths", "addStrength");
 
   if (!strengths.ok) {
-    failTo(classPath, describeRejection(strengths, "strength"));
+    failTo(classPath, describeRejection(strengths, "điểm mạnh"));
   }
 
   const focusAreas = readSubmittedTags(formData, "focusAreas", "addFocusArea");
 
   if (!focusAreas.ok) {
-    failTo(classPath, describeRejection(focusAreas, "focus area"));
+    failTo(classPath, describeRejection(focusAreas, "nội dung cần cải thiện"));
   }
 
   const { data, error } = await supabase
@@ -408,11 +408,11 @@ export async function saveStandingNotes(
 
   if (error) {
     logDbError("class_members.update(strengths, focus_areas)", error);
-    failTo(classPath, "We could not save those notes. Please try again.");
+    failTo(classPath, "Chúng tôi chưa lưu được ghi chú. Vui lòng thử lại.");
   }
 
   if (!data || data.length === 0) {
-    failTo(classPath, "That student is no longer on this class list.");
+    failTo(classPath, "Học viên này không còn trong danh sách lớp.");
   }
 
   // The student's own class page reads the same two columns off their own
@@ -444,7 +444,7 @@ export async function removeStudent(classId: string, membershipId: string) {
     "joined",
     classPath,
     supabase,
-    "That student is no longer on this class list.",
+    "Học viên này không còn trong danh sách lớp.",
   );
 
   // The list, the detail page and the sidebar are rendered per request, but the
@@ -476,7 +476,7 @@ export async function cancelInvitation(classId: string, membershipId: string) {
     "invited",
     classPath,
     supabase,
-    "That invitation is no longer pending.",
+    "Lời mời này không còn ở trạng thái đang chờ.",
   );
 
   revalidatePath("/teacher", "layout");
@@ -517,13 +517,13 @@ export async function resendInvitation(classId: string, membershipId: string) {
 
   if (error) {
     logDbError("class_members.select(invited_email)", error);
-    failTo(classPath, "We could not send that invitation. Please try again.");
+    failTo(classPath, "Chúng tôi chưa gửi được lời mời. Vui lòng thử lại.");
   }
 
   // No row, or a row with no address: a student invited by link alone has
   // nothing to send to.
   if (!member?.invited_email) {
-    failTo(classPath, "That invitation is no longer pending.");
+    failTo(classPath, "Lời mời này không còn ở trạng thái đang chờ.");
   }
 
   const formData = new FormData();
@@ -595,14 +595,14 @@ export async function createSession(classId: string, formData: FormData) {
   const date = readCalendarDate(readText(formData, "date"));
 
   if (!date) {
-    failTo(newPath, "Please choose a date for this lesson.");
+    failTo(newPath, "Vui lòng chọn ngày cho buổi học này.");
   }
 
   const startTime = readText(formData, "start_time");
   const endTime = readText(formData, "end_time");
 
   if (!ISO_TIME.test(startTime) || !ISO_TIME.test(endTime)) {
-    failTo(newPath, "Please enter a start time and an end time.");
+    failTo(newPath, "Vui lòng nhập giờ bắt đầu và giờ kết thúc.");
   }
 
   const startsAt = instantOf(fields.timezone, date, startTime);
@@ -612,13 +612,13 @@ export async function createSession(classId: string, formData: FormData) {
   // would need a second date to express, which this form does not ask for, so
   // the two times are read on the one day the teacher chose.
   if (endsAt.getTime() <= startsAt.getTime()) {
-    failTo(newPath, "The end time must be after the start time.");
+    failTo(newPath, "Giờ kết thúc phải sau giờ bắt đầu.");
   }
 
   const title = readText(formData, "title");
 
   if (title.length > 200) {
-    failTo(newPath, "That lesson title is too long.");
+    failTo(newPath, "Tên buổi học quá dài.");
   }
 
   const { error } = await supabase.from("class_sessions").insert({
@@ -637,11 +637,11 @@ export async function createSession(classId: string, formData: FormData) {
     // The constraint stays the enforcement; this is only its wording. Checking
     // for the row first would be both a second query and a race.
     if (error.code === "23505") {
-      failTo(newPath, "This class already has a lesson starting at that time.");
+      failTo(newPath, "Lớp này đã có một buổi học bắt đầu vào giờ đó.");
     }
 
     logDbError("class_sessions.insert", error);
-    failTo(newPath, "We could not save this lesson. Please try again.");
+    failTo(newPath, "Chúng tôi chưa lưu được buổi học này. Vui lòng thử lại.");
   }
 
   // The class page lists the lessons and the sidebar is drawn from the same
@@ -694,7 +694,7 @@ async function authoriseSession(
   if (found.kind === "error") {
     // A failed read is not "no such lesson". Back to the class, which is known
     // to exist and is known to be this teacher's.
-    failTo(classPath, "We could not load this lesson. Please try again.");
+    failTo(classPath, "Chúng tôi chưa tải được buổi học này. Vui lòng thử lại.");
   }
 
   // Built from two segments that have now both been proved. Nothing submitted
@@ -751,13 +751,13 @@ export async function recordAttendance(
   );
 
   if (!isUuid(membershipId)) {
-    failTo(sessionPath, "That student is no longer on this class list.");
+    failTo(sessionPath, "Học viên này không còn trong danh sách lớp.");
   }
 
   const status = readText(formData, "status");
 
   if (!isAttendanceStatus(status)) {
-    failTo(sessionPath, "Please choose one of the attendance options.");
+    failTo(sessionPath, "Vui lòng chọn một trong các trạng thái điểm danh.");
   }
 
   // Steps 8 and 9 of the chain: the membership is this class's, and it is
@@ -775,11 +775,11 @@ export async function recordAttendance(
 
   if (memberError) {
     logDbError("class_members.select(active)", memberError);
-    failTo(sessionPath, "We could not save this attendance. Please try again.");
+    failTo(sessionPath, "Chúng tôi chưa lưu được điểm danh. Vui lòng thử lại.");
   }
 
   if (!member) {
-    failTo(sessionPath, "That student is no longer on this class list.");
+    failTo(sessionPath, "Học viên này không còn trong danh sách lớp.");
   }
 
   const { error } = await supabase.from("session_attendance").upsert(
@@ -799,7 +799,7 @@ export async function recordAttendance(
 
   if (error) {
     logDbError("session_attendance.upsert", error);
-    failTo(sessionPath, "We could not save this attendance. Please try again.");
+    failTo(sessionPath, "Chúng tôi chưa lưu được điểm danh. Vui lòng thử lại.");
   }
 
   revalidatePath(sessionPath);
@@ -850,19 +850,19 @@ export async function createLessonLog(
   const membershipId = readText(formData, "class_member_id");
 
   if (!isUuid(membershipId)) {
-    failTo(sessionPath, "Please choose which student this note is about.");
+    failTo(sessionPath, "Vui lòng chọn học viên cho ghi chú này.");
   }
 
   const skill = readText(formData, "skill");
 
   if (!isSkill(skill)) {
-    failTo(sessionPath, "Please choose one of the skills.");
+    failTo(sessionPath, "Vui lòng chọn một kỹ năng.");
   }
 
   const performance = readText(formData, "performance");
 
   if (!isPerformance(performance)) {
-    failTo(sessionPath, "Please choose how the student did.");
+    failTo(sessionPath, "Vui lòng chọn kết quả của học viên.");
   }
 
   // `readText` has already trimmed, which is what the CHECK measures: it is
@@ -870,26 +870,26 @@ export async function createLessonLog(
   const topic = readText(formData, "topic");
 
   if (topic.length === 0) {
-    failTo(sessionPath, "Please say what this lesson covered.");
+    failTo(sessionPath, "Vui lòng cho biết nội dung buổi học.");
   }
 
   if (topic.length > TOPIC_MAX_LENGTH) {
     failTo(
       sessionPath,
-      `Please keep the topic to ${TOPIC_MAX_LENGTH} characters or fewer.`,
+      `Vui lòng nhập chủ đề không quá ${TOPIC_MAX_LENGTH} ký tự.`,
     );
   }
 
   const note = readText(formData, "note");
 
   if (note.length === 0) {
-    failTo(sessionPath, "Please write a note before adding it.");
+    failTo(sessionPath, "Vui lòng nhập nội dung ghi chú trước khi thêm.");
   }
 
   if (note.length > NOTE_MAX_LENGTH) {
     failTo(
       sessionPath,
-      `Please keep the note to ${NOTE_MAX_LENGTH} characters or fewer.`,
+      `Vui lòng nhập ghi chú không quá ${NOTE_MAX_LENGTH} ký tự.`,
     );
   }
 
@@ -908,11 +908,11 @@ export async function createLessonLog(
 
   if (memberError) {
     logDbError("class_members.select(lesson log)", memberError);
-    failTo(sessionPath, "We could not save this note. Please try again.");
+    failTo(sessionPath, "Chúng tôi chưa lưu được ghi chú này. Vui lòng thử lại.");
   }
 
   if (!member) {
-    failTo(sessionPath, "That student is no longer on this class list.");
+    failTo(sessionPath, "Học viên này không còn trong danh sách lớp.");
   }
 
   const { error } = await supabase.from("lesson_logs").insert({
@@ -935,7 +935,7 @@ export async function createLessonLog(
 
   if (error) {
     logDbError("lesson_logs.insert", error);
-    failTo(sessionPath, "We could not save this note. Please try again.");
+    failTo(sessionPath, "Chúng tôi chưa lưu được ghi chú này. Vui lòng thử lại.");
   }
 
   revalidatePath(sessionPath);
@@ -987,7 +987,7 @@ export async function recordScoreEntry(
   // is the schema saying it about the class's own target. Checked here too,
   // because a form that is not on screen can still be posted.
   if (!isBandScored(courseType)) {
-    failTo(sessionPath, "This class does not record IELTS bands.");
+    failTo(sessionPath, "Lớp này không ghi nhận band IELTS.");
   }
 
   const membershipId = readText(formData, "membershipId");
@@ -995,11 +995,11 @@ export async function recordScoreEntry(
   const note = readText(formData, "note");
 
   if (!isUuid(membershipId)) {
-    failTo(sessionPath, "Please choose a student to record bands for.");
+    failTo(sessionPath, "Vui lòng chọn học viên để ghi nhận band.");
   }
 
   if (!isScoreEntryType(entryType)) {
-    failTo(sessionPath, "Please choose what kind of entry this is.");
+    failTo(sessionPath, "Vui lòng chọn loại đánh giá.");
   }
 
   // Every band field read the way `public.band` would: in range, on a half
@@ -1011,7 +1011,7 @@ export async function recordScoreEntry(
     if (!result.ok) {
       failTo(
         sessionPath,
-        "Bands must be a half point between 0.0 and 9.0. Please check the entry.",
+        "Band phải là bội số của 0,5 trong khoảng từ 0.0 đến 9.0. Vui lòng kiểm tra lại.",
       );
     }
     bands[field] = result.band;
@@ -1021,13 +1021,13 @@ export async function recordScoreEntry(
   // writing, speaking) > 0`. The schema's constraint, asked in front of it so
   // the answer is a sentence rather than a check violation.
   if (Object.values(bands).every((band) => band === null)) {
-    failTo(sessionPath, "Please record at least one band.");
+    failTo(sessionPath, "Vui lòng ghi nhận ít nhất một band.");
   }
 
   if (note.length > SCORE_NOTE_MAX_LENGTH) {
     failTo(
       sessionPath,
-      `Please keep the note to ${SCORE_NOTE_MAX_LENGTH} characters or fewer.`,
+      `Vui lòng nhập ghi chú không quá ${SCORE_NOTE_MAX_LENGTH} ký tự.`,
     );
   }
 
@@ -1046,11 +1046,11 @@ export async function recordScoreEntry(
 
   if (memberError) {
     logDbError("class_members.select(score entry)", memberError);
-    failTo(sessionPath, "We could not save these bands. Please try again.");
+    failTo(sessionPath, "Chúng tôi chưa lưu được band điểm. Vui lòng thử lại.");
   }
 
   if (!member) {
-    failTo(sessionPath, "That student is no longer on this class list.");
+    failTo(sessionPath, "Học viên này không còn trong danh sách lớp.");
   }
 
   // The day this lesson happened on, read on the class's clock. Never the
@@ -1085,13 +1085,13 @@ export async function recordScoreEntry(
 
   if (existingError) {
     logDbError("score_entries.select(existing)", existingError);
-    failTo(sessionPath, "We could not save these bands. Please try again.");
+    failTo(sessionPath, "Chúng tôi chưa lưu được band điểm. Vui lòng thử lại.");
   }
 
   if (existing && existing.length > 0) {
     failTo(
       sessionPath,
-      "This student already has an entry for this lesson. Remove it first to record a different one.",
+      "Học viên này đã có một mục điểm cho buổi học này. Hãy xóa mục đó trước khi ghi nhận mục mới.",
     );
   }
 
@@ -1119,11 +1119,11 @@ export async function recordScoreEntry(
     if (error.code === "23505") {
       failTo(
         sessionPath,
-        "This student already has a starting band. Remove it first if it needs to change.",
+        "Học viên này đã có band ban đầu. Hãy xóa mục đó trước nếu cần thay đổi.",
       );
     }
     logDbError("score_entries.insert", error);
-    failTo(sessionPath, "We could not save these bands. Please try again.");
+    failTo(sessionPath, "Chúng tôi chưa lưu được band điểm. Vui lòng thử lại.");
   }
 
   revalidatePath(sessionPath);
@@ -1157,7 +1157,7 @@ export async function removeScoreEntry(
   const { supabase, sessionPath } = await authoriseSession(classId, sessionId);
 
   if (!isUuid(entryId)) {
-    failTo(sessionPath, "We could not remove that entry. Please try again.");
+    failTo(sessionPath, "Chúng tôi chưa xóa được mục điểm này. Vui lòng thử lại.");
   }
 
   const { data: removed, error } = await supabase
@@ -1169,11 +1169,11 @@ export async function removeScoreEntry(
 
   if (error) {
     logDbError("score_entries.delete", error);
-    failTo(sessionPath, "We could not remove that entry. Please try again.");
+    failTo(sessionPath, "Chúng tôi chưa xóa được mục điểm này. Vui lòng thử lại.");
   }
 
   if (!removed || removed.length === 0) {
-    failTo(sessionPath, "That entry has already been removed.");
+    failTo(sessionPath, "Mục điểm này đã được xóa.");
   }
 
   revalidatePath(sessionPath);

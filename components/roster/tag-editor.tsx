@@ -126,7 +126,7 @@ export function TagEditor({
               <button
                 type="button"
                 onClick={() => setTags(tags.filter((held) => held !== tag))}
-                aria-label={`Remove ${tag}`}
+                aria-label={`Xóa ${tag}`}
                 className="rounded-full px-1 text-xs leading-none opacity-70 hover:opacity-100"
               >
                 &times;
@@ -151,9 +151,9 @@ export function TagEditor({
           }}
           list={listId}
           maxLength={MAX_TAG_LENGTH}
-          placeholder={full ? `${MAX_TAGS} is the limit` : "Add…"}
+          placeholder={full ? `Tối đa ${MAX_TAGS} mục` : "Thêm…"}
           disabled={full}
-          aria-label={`Add a ${label.toLowerCase().replace(/s$/, "")}`}
+          aria-label={`Thêm vào ${label.toLowerCase()}`}
           className="h-9 w-32 min-w-0 flex-1 py-0"
         />
         <Button
@@ -163,13 +163,13 @@ export function TagEditor({
           variant="outline"
           size="sm"
         >
-          Add
+          Thêm
         </Button>
       </div>
 
       {duplicate && trimmed !== "" ? (
         <p className="mt-1 text-xs break-words text-muted-foreground">
-          Already listed.
+          Mục này đã có trong danh sách.
         </p>
       ) : null}
     </fieldset>

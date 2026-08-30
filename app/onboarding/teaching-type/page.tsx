@@ -30,14 +30,14 @@ export default async function TeachingTypePage({
   return (
     <OnboardingShell
       step={1}
-      title="What do you primarily teach?"
-      description="This helps us tailor your experience."
+      title="Bạn chủ yếu dạy gì?"
+      description="Điều này giúp chúng tôi điều chỉnh trải nghiệm cho bạn."
     >
       {error ? <Alert className="mb-5">{error}</Alert> : null}
 
       <form action={saveTeachingType}>
         <fieldset>
-          <legend className="sr-only">What do you primarily teach?</legend>
+          <legend className="sr-only">Bạn chủ yếu dạy gì?</legend>
 
           <div className="mb-6 grid grid-cols-2 gap-3">
             {COURSE_TYPES.map((type) => (
@@ -52,8 +52,8 @@ export default async function TeachingTypePage({
           </div>
         </fieldset>
 
-        <SubmitButton pendingLabel="Saving…" className="w-full">
-          Continue
+        <SubmitButton pendingLabel="Đang lưu…" className="w-full">
+          Tiếp tục
         </SubmitButton>
       </form>
     </OnboardingShell>

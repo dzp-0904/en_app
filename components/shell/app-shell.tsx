@@ -51,12 +51,12 @@ const NAV: Record<
   }
 > = {
   teacher: {
-    heading: "For teachers",
-    items: [{ href: "/teacher", label: "Classes" }],
+    heading: "Dành cho giáo viên",
+    items: [{ href: "/teacher", label: "Lớp học" }],
   },
   student: {
-    heading: "For students",
-    items: [{ href: "/student", label: "Classes" }],
+    heading: "Dành cho học viên",
+    items: [{ href: "/student", label: "Lớp học" }],
   },
 };
 
@@ -90,7 +90,7 @@ export function AppShell({
       >
         <LogoMark size="sm" className="mr-auto lg:mr-0" />
 
-        <nav aria-label="Main" className="lg:mt-9">
+        <nav aria-label="Điều hướng chính" className="lg:mt-9">
           {/* The heading is the sidebar saying which product you are in. On the
               top bar there is no column for it to head, so it is dropped
               rather than squeezed in. */}
@@ -129,7 +129,7 @@ export function AppShell({
               size="sm"
               className="lg:-ml-3"
             >
-              Sign out
+              Đăng xuất
             </Button>
           </form>
         </div>
