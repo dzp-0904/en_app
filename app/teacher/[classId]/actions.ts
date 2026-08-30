@@ -11,7 +11,15 @@ import {
   NOTE_MAX_LENGTH,
   TOPIC_MAX_LENGTH,
 } from "@/lib/lesson-log";
+import type { CourseType } from "@/lib/course-type";
 import { requireTeacher } from "@/lib/onboarding";
+import {
+  BAND_SKILLS,
+  isBandScored,
+  isScoreEntryType,
+  readBand,
+  SCORE_NOTE_MAX_LENGTH,
+} from "@/lib/score";
 import { createClient } from "@/lib/supabase/server";
 import {
   isUuid,
@@ -144,16 +152,17 @@ async function authoriseRoster(
   membershipId: string,
 ): Promise<{
   supabase: Awaited<ReturnType<typeof createClient>>;
+  fields: TeacherClassFields;
   classPath: string;
 }> {
   const classPath = `/teacher/${classId}`;
-  const { supabase } = await authoriseClass(classId, classPath);
+  const { supabase, fields } = await authoriseClass(classId, classPath);
 
   if (!isUuid(membershipId)) {
     failTo(classPath, "That person is no longer on this class list.");
   }
 
-  return { supabase, classPath };
+  return { supabase, fields, classPath };
 }
 
 /**
@@ -197,6 +206,95 @@ async function softRemove(
   if (!data || data.length === 0) {
     failTo(classPath, gone);
   }
+}
+
+/**
+ * Sets, changes or clears one student's target band.
+ *
+ * The goal is `class_members.target_band`, which already exists and is already
+ * read by `v_member_current_band` — so the number the teacher picks here is the
+ * same number the student's progress panel shows and the same one
+ * `loadClassBands` puts on the session page. Nothing is stored twice.
+ *
+ * Three writes, one code path. A band sets it, a band changes it, and an empty
+ * field clears it back to "not set", because `target_band` is nullable and
+ * having no goal yet is a real state rather than a missing one.
+ *
+ * That last path is the one worth being explicit about. Clearing is an empty
+ * *present* field, never an absent one: `formData.has` is checked before the
+ * value is read, so a POST that simply omits `targetBand` is refused instead of
+ * being read as "the teacher chose Not set". `readText` alone could not tell
+ * those apart — it returns "" for both — and the difference is a wiped goal.
+ *
+ * Everything else is `removeStudent`'s shape. `authoriseRoster` settles the
+ * teacher, then the class, then the shape of the membership id, and the state
+ * checks live in the WHERE clause rather than in a read-then-assert: a removed
+ * student, an unclaimed invitation, a membership from another class and a
+ * membership from another teacher's class all match zero rows for the same
+ * reason, without a second query that could disagree with the first.
+ */
+export async function setTargetBand(
+  classId: string,
+  membershipId: string,
+  formData: FormData,
+) {
+  const { supabase, fields, classPath } = await authoriseRoster(
+    classId,
+    membershipId,
+  );
+
+  // `class_members` has no equivalent of `classes_no_target_band_when_unscored`,
+  // so the database would accept an IELTS goal on a General English class. The
+  // application does not, for the same reason the session page hides the bands
+  // section there: a band is meaningless where nothing is scored on one.
+  if (!isBandScored(fields.courseType)) {
+    failTo(classPath, "This class does not use IELTS band targets.");
+  }
+
+  if (!formData.has("targetBand")) {
+    failTo(classPath, "We could not save that target band. Please try again.");
+  }
+
+  const submitted = readText(formData, "targetBand");
+  const parsed = readBand(submitted);
+
+  // `readBand` is `public.band`'s CHECK written out — in range, on a half
+  // point, never rounded — so "6.7", "10", "-1" and "excellent" are all refused
+  // here rather than reaching Postgres and coming back as a domain violation.
+  if (!parsed.ok) {
+    failTo(
+      classPath,
+      "A target band must be a half point between 0.0 and 9.0. Please check the value.",
+    );
+  }
+
+  const { data, error } = await supabase
+    .from("class_members")
+    // The only column written. `updated_at` moves on its own, through the
+    // `set_updated_at` trigger the table already carries.
+    .update({ target_band: parsed.band })
+    .eq("id", membershipId)
+    // Both ids, as every roster write does: a membership id from another class
+    // — including one of this teacher's own — matches nothing.
+    .eq("class_id", classId)
+    .eq("join_status", "joined")
+    .is("removed_at", null)
+    .select("id");
+
+  if (error) {
+    logDbError("class_members.update(target_band)", error);
+    failTo(classPath, "We could not save that target band. Please try again.");
+  }
+
+  if (!data || data.length === 0) {
+    failTo(classPath, "That student is no longer on this class list.");
+  }
+
+  // The roster is what changed, but the student's own progress panel reads the
+  // same column through `v_member_current_band`, so the sidebar-level revalidate
+  // that `removeStudent` uses is the right breadth here too.
+  revalidatePath("/teacher", "layout");
+  redirect(classPath);
 }
 
 /**
@@ -454,6 +552,7 @@ async function authoriseSession(
   teacherId: string;
   session: ClassSession;
   timezone: string;
+  courseType: CourseType;
   sessionPath: string;
 }> {
   const classPath = `/teacher/${classId}`;
@@ -481,6 +580,9 @@ async function authoriseSession(
     teacherId,
     session: found.session,
     timezone: fields.timezone,
+    // Which decides whether this class keeps bands at all — see
+    // `scoringModelFor`. A proved value, not a submitted one.
+    courseType: fields.courseType,
     sessionPath: `/teacher/${classId}/sessions/${sessionId}`,
   };
 }
@@ -710,6 +812,244 @@ export async function createLessonLog(
   if (error) {
     logDbError("lesson_logs.insert", error);
     failTo(sessionPath, "We could not save this note. Please try again.");
+  }
+
+  revalidatePath(sessionPath);
+  redirect(sessionPath);
+}
+
+/**
+ * Records one band entry for one student, dated to this lesson.
+ *
+ * The same chain as `createLessonLog`, re-established in the same order on
+ * every call:
+ *
+ *   authenticated user → teacher → owned class → session in that class
+ *     → active member of that class → a valid entry
+ *
+ * `score_entries` is where the milestone's wording and the schema part company,
+ * and the schema wins. Three things about the table govern everything below:
+ *
+ *  1. There is no `session_id`. The table hangs off `class_members (id,
+ *     class_id)` by composite foreign key and off a `recorded_on date` — it is a
+ *     per-student band history, not a per-lesson score. So the lesson supplies
+ *     the date and nothing else, and it supplies it the way `lesson_logs`
+ *     already does: `zonedCalendarDate(timezone, session.startsAt)`, the day on
+ *     the class's own clock rather than the server's or the browser's.
+ *  2. It cannot be updated. `20260828001400_grants.sql` grants
+ *     `select, insert, delete` and no UPDATE, and
+ *     `enforce_score_entries_append_only` raises on any that slipped through.
+ *     Correcting an entry is therefore `removeScoreEntry` followed by another
+ *     of these — the path the table's own comment prescribes, and the one that
+ *     leaves the history honest instead of silently rewritten.
+ *  3. The audit column is `created_by`, not `recorded_by`. It comes from the
+ *     session cookie here, as everywhere else.
+ *
+ * The only uniqueness the schema declares is
+ * `score_entries_one_baseline_per_member`, one starting band per enrolment, and
+ * a second one is answered in the application's own words rather than
+ * Postgres's.
+ */
+export async function recordScoreEntry(
+  classId: string,
+  sessionId: string,
+  formData: FormData,
+): Promise<void> {
+  const { supabase, teacherId, session, timezone, courseType, sessionPath } =
+    await authoriseSession(classId, sessionId);
+
+  // A class that is not scored has no bands to record — `isBandScored` is the
+  // same rule the page renders by, and `classes_no_target_band_when_unscored`
+  // is the schema saying it about the class's own target. Checked here too,
+  // because a form that is not on screen can still be posted.
+  if (!isBandScored(courseType)) {
+    failTo(sessionPath, "This class does not record IELTS bands.");
+  }
+
+  const membershipId = readText(formData, "membershipId");
+  const entryType = readText(formData, "entryType");
+  const note = readText(formData, "note");
+
+  if (!isUuid(membershipId)) {
+    failTo(sessionPath, "Please choose a student to record bands for.");
+  }
+
+  if (!isScoreEntryType(entryType)) {
+    failTo(sessionPath, "Please choose what kind of entry this is.");
+  }
+
+  // Every band field read the way `public.band` would: in range, on a half
+  // point, and blank meaning "not measured" rather than zero. Malformed input is
+  // refused, never rounded into something nobody recorded.
+  const bands: Record<string, number | null> = {};
+  for (const field of ["overall", ...BAND_SKILLS]) {
+    const result = readBand(readText(formData, field));
+    if (!result.ok) {
+      failTo(
+        sessionPath,
+        "Bands must be a half point between 0.0 and 9.0. Please check the entry.",
+      );
+    }
+    bands[field] = result.band;
+  }
+
+  // `score_entries_not_empty`: `num_nonnulls(overall, reading, listening,
+  // writing, speaking) > 0`. The schema's constraint, asked in front of it so
+  // the answer is a sentence rather than a check violation.
+  if (Object.values(bands).every((band) => band === null)) {
+    failTo(sessionPath, "Please record at least one band.");
+  }
+
+  if (note.length > SCORE_NOTE_MAX_LENGTH) {
+    failTo(
+      sessionPath,
+      `Please keep the note to ${SCORE_NOTE_MAX_LENGTH} characters or fewer.`,
+    );
+  }
+
+  // This class's membership, and an active one — the same pair of facts
+  // `recordAttendance` and `createLessonLog` re-establish. The composite foreign
+  // key already refuses a member from another class; it knows nothing about
+  // `removed_at`.
+  const { data: member, error: memberError } = await supabase
+    .from("class_members")
+    .select("id")
+    .eq("id", membershipId)
+    .eq("class_id", classId)
+    .eq("join_status", "joined")
+    .is("removed_at", null)
+    .maybeSingle();
+
+  if (memberError) {
+    logDbError("class_members.select(score entry)", memberError);
+    failTo(sessionPath, "We could not save these bands. Please try again.");
+  }
+
+  if (!member) {
+    failTo(sessionPath, "That student is no longer on this class list.");
+  }
+
+  // The day this lesson happened on, read on the class's clock. Never the
+  // server's date, and never the browser's.
+  const recordedOn = zonedCalendarDate(timezone, session.startsAt);
+
+  // One entry per student per lesson date.
+  //
+  // Not a constraint the schema has, and said plainly: `score_entries` is an
+  // append-only history and is perfectly willing to hold two entries for one
+  // day. The reason is `v_member_current_band`, which picks the current band
+  // with `order by recorded_on desc, id desc` — among entries sharing a date
+  // that second key is a uuid, so two entries recorded at one lesson would make
+  // "current band" the arbitrary one rather than the later one, and
+  // `v_member_performance_status` would compare them in that same arbitrary
+  // order. Refusing the second entry is how this page stays out of a tie it
+  // cannot break; the correction path is the same as everywhere else here,
+  // remove the entry and record it again.
+  //
+  // A read before a write is not a lock, so two teachers submitting at the same
+  // instant could still both pass it. That leaves two honest rows and an
+  // ambiguous "current", which the Remove control resolves — the same outcome
+  // the database would give, and not a reason to invent a constraint the schema
+  // does not have.
+  const { data: existing, error: existingError } = await supabase
+    .from("score_entries")
+    .select("id")
+    .eq("class_member_id", membershipId)
+    .eq("class_id", classId)
+    .eq("recorded_on", recordedOn)
+    .limit(1);
+
+  if (existingError) {
+    logDbError("score_entries.select(existing)", existingError);
+    failTo(sessionPath, "We could not save these bands. Please try again.");
+  }
+
+  if (existing && existing.length > 0) {
+    failTo(
+      sessionPath,
+      "This student already has an entry for this lesson. Remove it first to record a different one.",
+    );
+  }
+
+  const { error } = await supabase.from("score_entries").insert({
+    class_member_id: membershipId,
+    // Half of the composite foreign key, and the proved segment rather than a
+    // submitted value.
+    class_id: classId,
+    // The day this lesson happened on, read on the class's clock.
+    recorded_on: recordedOn,
+    entry_type: entryType,
+    overall: bands.overall,
+    reading: bands.reading,
+    listening: bands.listening,
+    writing: bands.writing,
+    speaking: bands.speaking,
+    note: note === "" ? null : note,
+    // From the session cookie, never from the form.
+    created_by: teacherId,
+  });
+
+  if (error) {
+    // `score_entries_one_baseline_per_member` — the one uniqueness the schema
+    // declares. Answered before the log, in the application's own words.
+    if (error.code === "23505") {
+      failTo(
+        sessionPath,
+        "This student already has a starting band. Remove it first if it needs to change.",
+      );
+    }
+    logDbError("score_entries.insert", error);
+    failTo(sessionPath, "We could not save these bands. Please try again.");
+  }
+
+  revalidatePath(sessionPath);
+  redirect(sessionPath);
+}
+
+/**
+ * Deletes one band entry.
+ *
+ * The correction path, and the only one the schema offers: `score_entries` has
+ * no UPDATE grant and a trigger that refuses one, so a wrong entry is removed
+ * and recorded again rather than edited in place. That is the table's own
+ * comment, and it is why this exists at all.
+ *
+ * The delete names both ids the relationship provides — `id` and `class_id` —
+ * so an entry id belonging to another teacher's class matches no row rather
+ * than being fetched and compared afterwards. `score_entries_teacher_all`
+ * restricts the same statement to `app.my_class_ids()` underneath, and RLS is
+ * forced on the table, so this filter agrees with the policy rather than
+ * standing in for it.
+ *
+ * `.select("id")` is what makes "no such entry" distinguishable from "deleted":
+ * a delete that matched nothing is not an error, and the teacher is owed the
+ * difference.
+ */
+export async function removeScoreEntry(
+  classId: string,
+  sessionId: string,
+  entryId: string,
+): Promise<void> {
+  const { supabase, sessionPath } = await authoriseSession(classId, sessionId);
+
+  if (!isUuid(entryId)) {
+    failTo(sessionPath, "We could not remove that entry. Please try again.");
+  }
+
+  const { data: removed, error } = await supabase
+    .from("score_entries")
+    .delete()
+    .eq("id", entryId)
+    .eq("class_id", classId)
+    .select("id");
+
+  if (error) {
+    logDbError("score_entries.delete", error);
+    failTo(sessionPath, "We could not remove that entry. Please try again.");
+  }
+
+  if (!removed || removed.length === 0) {
+    failTo(sessionPath, "That entry has already been removed.");
   }
 
   revalidatePath(sessionPath);

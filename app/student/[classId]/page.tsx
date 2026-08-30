@@ -11,8 +11,16 @@ import { LABELS, isOfferedCourseType } from "@/lib/course-type";
 import { loadUserState } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
 import {
+  BAND_FIELD_LABELS,
+  formatBand,
+  isBandScored,
+  MEMBER_STATUS_LABELS,
+} from "@/lib/score";
+import {
+  loadStudentBands,
   loadStudentClass,
   loadStudentLessons,
+  type StudentBands,
   type StudentClassDetail,
   type StudentLesson,
 } from "@/lib/student";
@@ -52,6 +60,61 @@ const DATE = new Intl.DateTimeFormat("en-GB", {
 /** `YYYY-MM-DD` read as a calendar date, not a moment in the viewer's zone. */
 function asDate(iso: string): Date {
   return new Date(`${iso}T00:00:00Z`);
+}
+
+/**
+ * The student's own standing, in the same shape as the class facts above.
+ *
+ * Every value comes from `v_member_current_band` and
+ * `v_member_performance_status` exactly as the database reports them. Nothing is
+ * averaged and nothing is compared here — the two views own those definitions,
+ * and the teacher's page reads the same ones, so both sides of the application
+ * say the same thing about the same student.
+ *
+ * A row this student has no band for is left out rather than shown empty, for
+ * the same reason `factsFor` skips a blank column: an empty value reads like a
+ * result, and a missing skill is not a zero.
+ */
+function progressFor(bands: StudentBands): { term: string; value: string }[] {
+  const facts: { term: string; value: string }[] = [];
+
+  const start = formatBand(bands.startOverall);
+  if (start) facts.push({ term: "Starting", value: start });
+
+  const current = formatBand(bands.currentOverall);
+  if (current) facts.push({ term: "Current", value: current });
+
+  const skills = (
+    [
+      ["reading", bands.currentReading],
+      ["listening", bands.currentListening],
+      ["writing", bands.currentWriting],
+      ["speaking", bands.currentSpeaking],
+    ] as const
+  )
+    .map(([skill, band]) => {
+      const shown = formatBand(band);
+      return shown === null ? null : `${BAND_FIELD_LABELS[skill]} ${shown}`;
+    })
+    .filter((part): part is string => part !== null);
+
+  if (skills.length > 0) facts.push({ term: "Skills", value: skills.join(" · ") });
+
+  const target = formatBand(bands.targetBand);
+  if (target) facts.push({ term: "Target", value: target });
+
+  facts.push({ term: "Progress", value: MEMBER_STATUS_LABELS[bands.status] });
+
+  // A calendar date in the class's zone, read as one — the same `asDate` the
+  // start and end dates above go through, and no browser-local conversion.
+  if (bands.currentRecordedOn) {
+    facts.push({
+      term: "Updated",
+      value: DATE.format(asDate(bands.currentRecordedOn)),
+    });
+  }
+
+  return facts;
 }
 
 /** The facts worth showing, skipping every column this class left blank. */
@@ -133,11 +196,17 @@ export default async function StudentClassPage({
   // Only now: `detail.membershipId` came from the membership query above, which
   // was filtered by `getUser()`'s id. Nothing off the URL reaches this call
   // except `classId`, which has just been proved to be one of this student's.
-  const lessons = await loadStudentLessons(
-    supabase,
-    detail.classId,
-    detail.membershipId,
-  );
+  // Only an IELTS class has bands at all — `scoringModelFor` is the rule, and
+  // `classes_no_target_band_when_unscored` is the schema agreeing. Neither read
+  // answers to the other, so they go out together.
+  const banded = isBandScored(detail.courseType);
+
+  const [lessons, bands] = await Promise.all([
+    loadStudentLessons(supabase, detail.classId, detail.membershipId),
+    banded
+      ? loadStudentBands(supabase, detail.classId, detail.membershipId)
+      : Promise.resolve(null),
+  ]);
 
   return (
     <Frame>
@@ -168,6 +237,43 @@ export default async function StudentClassPage({
           ))}
         </dl>
       </Card>
+
+      {banded ? (
+        <>
+          <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            My progress
+          </h2>
+
+          {bands === null ? (
+            // Not "no bands": the query failed, and the two must not look alike.
+            <Alert>
+              We couldn&apos;t load your progress just now. Please refresh the
+              page.
+            </Alert>
+          ) : bands.currentOverall === null && bands.startOverall === null ? (
+            <Card>
+              <p className="text-sm text-muted-foreground">
+                No bands have been recorded yet.
+              </p>
+            </Card>
+          ) : (
+            <Card>
+              <dl className="space-y-3">
+                {progressFor(bands).map((fact) => (
+                  <div key={fact.term} className="flex gap-4 text-sm">
+                    <dt className="w-24 shrink-0 text-muted-foreground">
+                      {fact.term}
+                    </dt>
+                    <dd className="break-words text-foreground">
+                      {fact.value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </Card>
+          )}
+        </>
+      ) : null}
 
       <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
         Lessons

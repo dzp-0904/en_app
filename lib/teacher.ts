@@ -3,6 +3,7 @@ import "server-only";
 import type { AttendanceStatus } from "@/lib/attendance";
 import type { CourseType } from "@/lib/course-type";
 import type { Performance, Skill } from "@/lib/lesson-log";
+import type { MemberStatus, ScoreEntryType } from "@/lib/score";
 import type { createClient } from "@/lib/supabase/server";
 
 /**
@@ -87,6 +88,16 @@ export type RosterEntry = {
   invitedAt: string | null;
   /** Stamped only on a confirmed SMTP send, so it never overstates delivery. */
   inviteEmailSentAt: string | null;
+  /**
+   * `class_members.target_band` — the goal set for this one student, null until
+   * a teacher sets it.
+   *
+   * Not `classes.target_band`, which is the class's own default and a different
+   * column: a class aiming at 6.5 can hold a student working towards 7.5. The
+   * same distinction `MemberBands.targetBand` draws, read from the table here
+   * because the roster does not otherwise touch the band views.
+   */
+  targetBand: number | null;
 };
 
 export type TeacherClassDetail = TeacherClass & {
@@ -386,7 +397,7 @@ export async function loadTeacherClass(
   const { data: members, error: rosterError } = await supabase
     .from("class_members")
     .select(
-      "id, join_status, invited_email, invited_name, invited_at, invite_email_sent_at, joined_at, profiles!class_members_student_id_fkey(full_name, email)",
+      "id, join_status, invited_email, invited_name, invited_at, invite_email_sent_at, joined_at, target_band, profiles!class_members_student_id_fkey(full_name, email)",
     )
     .eq("class_id", classId)
     .in("join_status", PRESENT)
@@ -417,6 +428,7 @@ export async function loadTeacherClass(
       joinedAt: member.joined_at,
       invitedAt: member.invited_at,
       inviteEmailSentAt: member.invite_email_sent_at,
+      targetBand: member.target_band,
     };
   });
 
@@ -701,5 +713,172 @@ export async function loadSessionLessonNotes(
     topic: log.topic,
     note: log.note,
     createdAt: log.created_at,
+  }));
+}
+
+/**
+ * Where one student currently stands, as the database already computes it.
+ *
+ * Every field here comes from `v_member_current_band` and
+ * `v_member_performance_status`, both `security_invoker` views that have existed
+ * since the schema was created. Nothing is recalculated: "current band" is the
+ * latest entry, "starting band" is the baseline row, and `status` is the
+ * comparison between the two most recent comparable entries — three definitions
+ * the database owns, and which the application would only be able to disagree
+ * with.
+ *
+ * `targetBand` is `class_members.target_band`, the goal set for this student.
+ * It is not `classes.target_band`, which is the class's own default and a
+ * different column; the view chose the per-student one, so this does too.
+ *
+ * Every band is nullable because a student who has never been assessed has no
+ * bands, and `null` says that rather than pretending it is a zero.
+ */
+export type MemberBands = {
+  membershipId: string;
+  status: MemberStatus;
+  targetBand: number | null;
+  startOverall: number | null;
+  currentOverall: number | null;
+  currentReading: number | null;
+  currentListening: number | null;
+  currentWriting: number | null;
+  currentSpeaking: number | null;
+  /** The date of the most recent entry, `YYYY-MM-DD` in the class's zone. */
+  currentRecordedOn: string | null;
+};
+
+/**
+ * One recorded entry in a student's band history.
+ *
+ * A row of `score_entries`, which belongs to a membership and a date — there is
+ * no `session_id` on the table, and none is invented here. A lesson's entries
+ * are the entries whose `recorded_on` is that lesson's date on the class's own
+ * clock, which is exactly how `lesson_logs.lesson_date` is derived too.
+ */
+export type ScoreEntry = {
+  entryId: string;
+  membershipId: string;
+  studentName: string | null;
+  entryType: ScoreEntryType;
+  overall: number | null;
+  reading: number | null;
+  listening: number | null;
+  writing: number | null;
+  speaking: number | null;
+  note: string | null;
+  recordedOn: string;
+  createdAt: string;
+};
+
+/**
+ * Where every student in one class currently stands.
+ *
+ * Two reads of two views, keyed by membership, rather than one read per student:
+ * a class with twenty students still asks twice. Both views are filtered on
+ * `class_id`, which is the same column their own RLS resolves through, so the
+ * filter agrees with the policy rather than standing in for it.
+ *
+ * `null` means a query failed. A member with no entries still gets an entry in
+ * the map, with every band `null` — that is the view's own answer, not an
+ * absence, and the difference matters to the caller.
+ */
+export async function loadClassBands(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+): Promise<Map<string, MemberBands> | null> {
+  const [bands, statuses] = await Promise.all([
+    supabase
+      .from("v_member_current_band")
+      .select(
+        "class_member_id, target_band, start_overall, current_overall, current_reading, current_listening, current_writing, current_speaking, current_recorded_on",
+      )
+      .eq("class_id", classId),
+    supabase
+      .from("v_member_performance_status")
+      .select("class_member_id, status")
+      .eq("class_id", classId),
+  ]);
+
+  if (bands.error) {
+    logDbError("v_member_current_band.select", bands.error);
+    return null;
+  }
+  if (statuses.error) {
+    logDbError("v_member_performance_status.select", statuses.error);
+    return null;
+  }
+
+  const status = new Map<string, MemberStatus>();
+  for (const row of statuses.data ?? []) {
+    if (row.class_member_id && row.status) status.set(row.class_member_id, row.status);
+  }
+
+  const standing = new Map<string, MemberBands>();
+  for (const row of bands.data ?? []) {
+    if (!row.class_member_id) continue;
+    standing.set(row.class_member_id, {
+      membershipId: row.class_member_id,
+      // 'stable' is what the view itself returns for a member with nothing to
+      // compare, so a missing row and an uneventful one read the same way.
+      status: status.get(row.class_member_id) ?? "stable",
+      targetBand: row.target_band,
+      startOverall: row.start_overall,
+      currentOverall: row.current_overall,
+      currentReading: row.current_reading,
+      currentListening: row.current_listening,
+      currentWriting: row.current_writing,
+      currentSpeaking: row.current_speaking,
+      currentRecordedOn: row.current_recorded_on,
+    });
+  }
+
+  return standing;
+}
+
+/**
+ * The band entries recorded on one lesson's date.
+ *
+ * Scoped to the class and to that date, and joined to the roster only for the
+ * student's name — the same embed the lesson-note list uses, and reachable only
+ * through the policies that already govern `class_members`.
+ *
+ * `null` means the query failed, `[]` means nothing was recorded that day.
+ */
+export async function loadScoreEntriesOn(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+  recordedOn: string,
+): Promise<ScoreEntry[] | null> {
+  const { data: entries, error } = await supabase
+    .from("score_entries")
+    .select(
+      "id, class_member_id, entry_type, overall, reading, listening, writing, speaking, note, recorded_on, created_at, class_members!score_entries_member_fk(invited_name, profiles!class_members_student_id_fkey(full_name))",
+    )
+    .eq("class_id", classId)
+    .eq("recorded_on", recordedOn)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    logDbError("score_entries.select", error);
+    return null;
+  }
+
+  return (entries ?? []).map((entry) => ({
+    entryId: entry.id,
+    membershipId: entry.class_member_id,
+    studentName:
+      entry.class_members?.profiles?.full_name ??
+      entry.class_members?.invited_name ??
+      null,
+    entryType: entry.entry_type,
+    overall: entry.overall,
+    reading: entry.reading,
+    listening: entry.listening,
+    writing: entry.writing,
+    speaking: entry.speaking,
+    note: entry.note,
+    recordedOn: entry.recorded_on,
+    createdAt: entry.created_at,
   }));
 }

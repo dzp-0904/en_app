@@ -11,13 +11,26 @@ import { PERFORMANCE_LABELS, SKILL_LABELS } from "@/lib/lesson-log";
 import { loadUserState } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
 import {
+  BAND_FIELD_LABELS,
+  BAND_FIELDS,
+  formatBand,
+  isBandScored,
+  SCORE_ENTRY_TYPE_LABELS,
+} from "@/lib/score";
+import {
   loadStudentClass,
   loadStudentLesson,
+  loadStudentScoreEntries,
   loadStudentSessionNotes,
   type StudentNote,
+  type StudentScoreEntry,
 } from "@/lib/student";
 import { createClient } from "@/lib/supabase/server";
-import { formatZonedDate, formatZonedTime } from "@/lib/time";
+import {
+  formatZonedDate,
+  formatZonedTime,
+  zonedCalendarDate,
+} from "@/lib/time";
 
 export const metadata: Metadata = {
   title: "Lesson",
@@ -134,12 +147,29 @@ export default async function StudentLessonPage({
   // nothing else — the lesson's own facts still render. `null` is that failure
   // and is deliberately not `[]`: "your teacher wrote nothing" is a claim this
   // page may only make on an answer it actually got.
-  const notes = await loadStudentSessionNotes(
-    supabase,
-    detail.classId,
-    sessionId,
-    detail.membershipId,
-  );
+  // `score_entries` has no `session_id` — it hangs off a membership and a
+  // `recorded_on date` — so this lesson's entries are the ones dated to the day
+  // it happened on, derived by the same function on the same class clock that
+  // `recordScoreEntry` writes them with. No second timezone idea, and no
+  // browser-local conversion.
+  const banded = isBandScored(detail.courseType);
+
+  const [notes, entries] = await Promise.all([
+    loadStudentSessionNotes(
+      supabase,
+      detail.classId,
+      sessionId,
+      detail.membershipId,
+    ),
+    banded
+      ? loadStudentScoreEntries(
+          supabase,
+          detail.classId,
+          detail.membershipId,
+          zonedCalendarDate(detail.timezone, lesson.startsAt),
+        )
+      : Promise.resolve(null),
+  ]);
 
   return (
     <Frame classId={classId}>
@@ -191,6 +221,38 @@ export default async function StudentLessonPage({
         )}
       </Card>
 
+      {banded ? (
+        <>
+          <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            My bands
+          </h2>
+
+          {entries === null ? (
+            // Not "nothing was recorded": the query failed, and the two must
+            // not look alike.
+            <Alert>
+              We couldn&apos;t load your bands just now. Please refresh the page.
+            </Alert>
+          ) : entries.length === 0 ? (
+            <Card>
+              <p className="text-sm text-muted-foreground">
+                No bands recorded for this lesson.
+              </p>
+            </Card>
+          ) : (
+            <ul className="space-y-3">
+              {entries.map((entry) => (
+                <li key={entry.entryId}>
+                  <Card>
+                    <Entry entry={entry} />
+                  </Card>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      ) : null}
+
       <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
         My lesson notes
       </h2>
@@ -216,6 +278,43 @@ export default async function StudentLessonPage({
         </ul>
       )}
     </Frame>
+  );
+}
+
+/**
+ * One band entry, laid out as the teacher's own page lays it out, minus the
+ * student's name — which on this page is always the reader's.
+ *
+ * Read-only, like everything else in this route: there is no Remove control
+ * here and no Server Action in the file. Correcting an entry is the teacher's,
+ * and `score_entries` grants a student SELECT and nothing more.
+ *
+ * A skill with no band is left out rather than shown as a dash. An entry may
+ * legitimately record speaking alone — `score_entries_not_empty` asks for one of
+ * the five and no more — and a row of dashes would read like four results.
+ */
+function Entry({ entry }: { entry: StudentScoreEntry }) {
+  const bands = BAND_FIELDS.map((field) => {
+    const band = formatBand(entry[field]);
+    return band === null ? null : `${BAND_FIELD_LABELS[field]} ${band}`;
+  }).filter((part): part is string => part !== null);
+
+  return (
+    <>
+      <p className="text-sm font-medium text-foreground">
+        {SCORE_ENTRY_TYPE_LABELS[entry.entryType]}
+      </p>
+
+      <p className="mt-1 text-sm break-words text-muted-foreground">
+        {bands.join(" · ")}
+      </p>
+
+      {entry.note ? (
+        <p className="mt-2 text-sm break-words whitespace-pre-line text-foreground">
+          {entry.note}
+        </p>
+      ) : null}
+    </>
   );
 }
 

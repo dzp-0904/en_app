@@ -25,7 +25,13 @@ import {
 } from "@/lib/teacher";
 import { formatZonedDate, formatZonedTime } from "@/lib/time";
 
-import { cancelInvitation, removeStudent, resendInvitation } from "./actions";
+import { BAND_VALUES, formatBand, isBandScored } from "@/lib/score";
+import {
+  cancelInvitation,
+  removeStudent,
+  resendInvitation,
+  setTargetBand,
+} from "./actions";
 
 /**
  * One of the teacher's classes: what it is, how to invite people to it, and who
@@ -150,6 +156,12 @@ export default async function TeacherClassPage({
 
   const students = detail.roster.filter((entry) => entry.status === "joined");
   const pending = detail.roster.filter((entry) => entry.status === "invited");
+
+  // The same test the session page makes before showing bands at all. A target
+  // band is an IELTS goal, and a class that scores on nothing has no use for
+  // one — `setTargetBand` refuses the write for the same reason, so the control
+  // is absent here rather than present and rejected.
+  const banded = isBandScored(detail.courseType);
 
   return (
     <Frame>
@@ -294,6 +306,10 @@ export default async function TeacherClassPage({
                   </p>
                 ) : null}
 
+                {banded ? (
+                  <TargetBand entry={entry} classId={detail.classId} />
+                ) : null}
+
                 <Confirm
                   label="Remove student"
                   prompt={`${nameOf(entry)} will be taken off this class list. Their account and any other classes they are in are not affected.`}
@@ -367,6 +383,77 @@ export default async function TeacherClassPage({
         </>
       ) : null}
     </Frame>
+  );
+}
+
+/**
+ * One student's goal, and the way to change it.
+ *
+ * The saved value is printed above the picker rather than left to the
+ * `<select>`'s own state, because those two can disagree: after a rejected save
+ * the browser keeps showing the value the teacher chose while the database
+ * still holds the old one. The line is read from the roster on every render, so
+ * it is always the stored goal — the picker is the editor, the line is the
+ * truth, exactly as `Standing` and `ScoreForm` are split on the session page.
+ *
+ * The options are `BAND_VALUES`, `public.band`'s CHECK written out, plus one
+ * explicit "Not set" carrying the empty string. A goal that has not been set is
+ * a real state and clearing one is a real edit, so it is offered as a choice a
+ * teacher can pick rather than something only reachable by never touching the
+ * control. `setTargetBand` reads that empty string as the clear.
+ *
+ * A plain `<form action={...}>` with the shared `SubmitButton`: pending shows
+ * as "Saving…" on the button, the page re-renders from the server afterwards,
+ * and with JavaScript off the whole thing still posts and still saves. No
+ * optimistic display, because unlike an attendance mark this value is not one
+ * of four buttons whose pressed state is the feedback — the printed line is,
+ * and printing a number the server has not accepted yet would be a claim the
+ * save succeeded.
+ */
+function TargetBand({
+  entry,
+  classId,
+}: {
+  entry: RosterEntry;
+  classId: string;
+}) {
+  const saved = formatBand(entry.targetBand);
+  const field = `target-${entry.membershipId}`;
+
+  return (
+    <form
+      action={setTargetBand.bind(null, classId, entry.membershipId)}
+      className="mt-3 border-t border-border pt-3"
+    >
+      <label
+        htmlFor={field}
+        className="text-xs font-medium tracking-wide text-muted-foreground uppercase"
+      >
+        Target band
+      </label>
+
+      <p className="mt-1 text-sm text-foreground">{saved ?? "Not set"}</p>
+
+      {/* `flex-wrap` so the picker and the button stack rather than overflow
+          once the card is 390px wide. */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select
+          id={field}
+          name="targetBand"
+          defaultValue={saved ?? ""}
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+        >
+          <option value="">Not set</option>
+          {BAND_VALUES.map((band) => (
+            <option key={band} value={band}>
+              {band}
+            </option>
+          ))}
+        </select>
+
+        <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
+      </div>
+    </form>
   );
 }
 
@@ -473,7 +560,7 @@ function Confirm({
       </summary>
 
       <div className="mt-3 rounded-lg border border-destructive/25 bg-destructive-light p-3.5">
-        <p className="mb-3 text-sm text-destructive">{prompt}</p>
+        <p className="mb-3 text-sm break-words text-destructive">{prompt}</p>
 
         <form action={action}>
           <SubmitButton
@@ -498,16 +585,20 @@ function Person({ entry }: { entry: RosterEntry }) {
   if (entry.name) {
     return (
       <>
-        <h3 className="mb-1 font-semibold text-foreground">{entry.name}</h3>
+        <h3 className="mb-1 font-semibold break-words text-foreground">
+          {entry.name}
+        </h3>
         {entry.email ? (
-          <p className="text-sm text-muted-foreground">{entry.email}</p>
+          <p className="text-sm break-words text-muted-foreground">
+            {entry.email}
+          </p>
         ) : null}
       </>
     );
   }
 
   return (
-    <h3 className="font-semibold text-foreground">
+    <h3 className="font-semibold break-words text-foreground">
       {entry.email ?? "Unnamed student"}
     </h3>
   );

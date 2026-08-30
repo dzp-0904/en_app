@@ -3,6 +3,7 @@ import "server-only";
 import type { AttendanceStatus } from "@/lib/attendance";
 import type { Performance, Skill } from "@/lib/lesson-log";
 import type { CourseType } from "@/lib/course-type";
+import type { MemberStatus, ScoreEntryType } from "@/lib/score";
 import type { createClient } from "@/lib/supabase/server";
 
 /**
@@ -511,5 +512,161 @@ export async function loadStudentSessionNotes(
     topic: log.topic,
     note: log.note,
     createdAt: log.created_at,
+  }));
+}
+
+/**
+ * Where this student currently stands, as the database already computes it.
+ *
+ * The student's half of `MemberBands` in `lib/teacher.ts`, and deliberately the
+ * same fields from the same two views — `v_member_current_band` and
+ * `v_member_performance_status`. Both are `security_invoker`, so they resolve
+ * through the reader's own policies: `score_entries_student_select` admits only
+ * `class_member_id = any (app.my_member_ids())`, which is the student's own
+ * enrolments and nothing else. A classmate's bands are not filtered out here;
+ * they are unreadable.
+ *
+ * Nothing is recalculated on this side either. If the teacher's page and this
+ * one ever disagreed about what "current band" meant, one of them would be
+ * telling a student something their teacher never recorded.
+ */
+export type StudentBands = {
+  status: MemberStatus;
+  targetBand: number | null;
+  startOverall: number | null;
+  currentOverall: number | null;
+  currentReading: number | null;
+  currentListening: number | null;
+  currentWriting: number | null;
+  currentSpeaking: number | null;
+  /** The date of the most recent entry, `YYYY-MM-DD` in the class's zone. */
+  currentRecordedOn: string | null;
+};
+
+/** One of this student's own band entries. */
+export type StudentScoreEntry = {
+  entryId: string;
+  entryType: ScoreEntryType;
+  overall: number | null;
+  reading: number | null;
+  listening: number | null;
+  writing: number | null;
+  speaking: number | null;
+  note: string | null;
+  recordedOn: string;
+};
+
+/**
+ * This student's standing in one class.
+ *
+ * Both ids the relationship provides are named — the membership and the class —
+ * so a `classId` that does not belong with this membership matches no row rather
+ * than being fetched and compared afterwards. `membershipId` never comes off the
+ * URL: the caller has already proved it through `loadStudentClass`.
+ *
+ * `null` means a query failed. A member the views have nothing to say about is
+ * not a failure and does not return `null`: the views' own answer for a student
+ * with no entries is a row of nulls and `'stable'`, and that is what is
+ * reconstructed here, so "never assessed" and "the database did not answer" stay
+ * different facts.
+ */
+export async function loadStudentBands(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+  membershipId: string,
+): Promise<StudentBands | null> {
+  const [bands, status] = await Promise.all([
+    supabase
+      .from("v_member_current_band")
+      .select(
+        "target_band, start_overall, current_overall, current_reading, current_listening, current_writing, current_speaking, current_recorded_on",
+      )
+      .eq("class_member_id", membershipId)
+      .eq("class_id", classId)
+      .maybeSingle(),
+    supabase
+      .from("v_member_performance_status")
+      .select("status")
+      .eq("class_member_id", membershipId)
+      .eq("class_id", classId)
+      .maybeSingle(),
+  ]);
+
+  if (bands.error) {
+    console.error("[student] failed to load current band", {
+      code: bands.error.code,
+      message: bands.error.message,
+    });
+    return null;
+  }
+
+  if (status.error) {
+    console.error("[student] failed to load performance status", {
+      code: status.error.code,
+      message: status.error.message,
+    });
+    return null;
+  }
+
+  return {
+    // 'stable' is what the view itself returns when there is nothing to
+    // compare, so a missing row and an uneventful one read the same way.
+    status: status.data?.status ?? "stable",
+    targetBand: bands.data?.target_band ?? null,
+    startOverall: bands.data?.start_overall ?? null,
+    currentOverall: bands.data?.current_overall ?? null,
+    currentReading: bands.data?.current_reading ?? null,
+    currentListening: bands.data?.current_listening ?? null,
+    currentWriting: bands.data?.current_writing ?? null,
+    currentSpeaking: bands.data?.current_speaking ?? null,
+    currentRecordedOn: bands.data?.current_recorded_on ?? null,
+  };
+}
+
+/**
+ * This student's own band entries dated to one lesson.
+ *
+ * `score_entries` has no `session_id`, so a lesson's entries are the ones
+ * recorded on that lesson's date — the same derivation the teacher's page and
+ * `recordScoreEntry` use, on the same class clock. All three ids are named in
+ * the filter, and `score_entries_student_select` restricts the same statement to
+ * this student's memberships underneath.
+ *
+ * `null` means the query failed, `[]` means nothing was recorded that day.
+ */
+export async function loadStudentScoreEntries(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+  membershipId: string,
+  recordedOn: string,
+): Promise<StudentScoreEntry[] | null> {
+  const { data: entries, error } = await supabase
+    .from("score_entries")
+    .select(
+      "id, entry_type, overall, reading, listening, writing, speaking, note, recorded_on",
+    )
+    .eq("class_member_id", membershipId)
+    .eq("class_id", classId)
+    .eq("recorded_on", recordedOn)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("[student] failed to load band entries", {
+      code: error.code,
+      message: error.message,
+    });
+    return null;
+  }
+
+  return (entries ?? []).map((entry) => ({
+    entryId: entry.id,
+    entryType: entry.entry_type,
+    overall: entry.overall,
+    reading: entry.reading,
+    listening: entry.listening,
+    writing: entry.writing,
+    speaking: entry.speaking,
+    note: entry.note,
+    recordedOn: entry.recorded_on,
   }));
 }
