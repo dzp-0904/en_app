@@ -905,7 +905,7 @@ known gaps.
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `__M23_HASH__` — "fix: polish navigation performance and UI (M23)" |
+| HEAD | `461e251` — "fix: polish navigation performance and UI (M23)" |
 | `origin/main` | `7449ef8` — **M22 IS pushed; M23 is committed locally and NOT
   pushed.** The M22-era note here saying `ad4ed65` / "not pushed" was stale:
   the user pushed M22 between sessions. |
