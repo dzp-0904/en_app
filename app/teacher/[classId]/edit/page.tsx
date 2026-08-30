@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { updateClass } from "@/app/onboarding/actions";
 import { ClassForm } from "@/components/class/class-form";
 import { Alert } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageShell } from "@/components/ui/page-shell";
 import { isOfferedCourseType } from "@/lib/course-type";
 import { requireTeacher } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
@@ -78,7 +78,7 @@ export default async function EditClassPage({
   // could otherwise have had.
   if (!isOfferedCourseType(fields.courseType)) {
     return (
-      <Frame classId={classId}>
+      <Frame classId={classId} className={fields.className}>
         <Alert>
           Lớp này được thiết lập với loại khóa học tùy chỉnh mà biểu mẫu này
           chưa chỉnh sửa được.
@@ -91,11 +91,7 @@ export default async function EditClassPage({
   const error = typeof query.error === "string" ? query.error : undefined;
 
   return (
-    <Frame classId={classId}>
-      <h1 className="mb-8 font-serif text-2xl leading-relaxed text-foreground">
-        Chỉnh sửa lớp
-      </h1>
-
+    <Frame classId={classId} className={fields.className}>
       {error ? <Alert className="mb-5">{error}</Alert> : null}
 
       <Card>
@@ -123,27 +119,36 @@ export default async function EditClassPage({
 
 /**
  * The shell every state shares — including the error states, which keep the
- * back link so a failed load does not strand anyone on a page with no exit.
+ * trail so a failed load does not strand anyone on a page with no exit.
  *
- * Back goes to the class, not to `/teacher`: the class is where the teacher came
- * from and where a successful save returns them.
+ * The trail passes through the class rather than jumping straight to the list:
+ * the class is where the teacher came from and where a successful save returns
+ * them. The class crumb is dropped only when the load failed outright and there
+ * is no name to put in it; `/teacher` still gets them out.
  */
 function Frame({
   classId,
+  className,
   children,
 }: {
   classId: string;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <main className="flex flex-1 justify-center bg-background p-8">
-      <div className="w-full max-w-lg">
-        <Button asChild variant="ghost" size="inline" className="mb-6 text-sm">
-          <Link href={`/teacher/${classId}`}>← Quay lại lớp học</Link>
-        </Button>
+    <PageShell width="2xl">
+      <PageHeader
+        breadcrumb={[
+          { label: "Lớp học", href: "/teacher" },
+          ...(className
+            ? [{ label: className, href: `/teacher/${classId}` }]
+            : []),
+          { label: "Chỉnh sửa lớp" },
+        ]}
+        title="Chỉnh sửa lớp"
+      />
 
-        {children}
-      </div>
-    </main>
+      {children}
+    </PageShell>
   );
 }

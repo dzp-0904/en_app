@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { ClassForm } from "@/components/class/class-form";
 import { Alert } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageShell } from "@/components/ui/page-shell";
 import {
   isOnboardingComplete,
   requireTeacher,
@@ -46,22 +46,20 @@ export default async function NewClassPage({ searchParams }: PageSearchParams) {
   const error = typeof params.error === "string" ? params.error : undefined;
 
   return (
-    <main className="flex flex-1 justify-center bg-background p-8">
-      <div className="w-full max-w-lg">
-        <Button asChild variant="ghost" size="inline" className="mb-6 text-sm">
-          <Link href="/teacher">← Quay lại danh sách lớp</Link>
-        </Button>
+    <PageShell width="2xl">
+      <PageHeader
+        breadcrumb={[
+          { label: "Lớp học", href: "/teacher" },
+          { label: "Tạo lớp học" },
+        ]}
+        title="Tạo lớp học"
+      />
 
-        <h1 className="mb-8 font-serif text-2xl leading-relaxed text-foreground">
-          Tạo lớp học
-        </h1>
+      {error ? <Alert className="mb-5">{error}</Alert> : null}
 
-        {error ? <Alert className="mb-5">{error}</Alert> : null}
-
-        <Card>
-          <ClassForm action={createClass} defaultCourseType={teachingType} />
-        </Card>
-      </div>
-    </main>
+      <Card>
+        <ClassForm action={createClass} defaultCourseType={teachingType} />
+      </Card>
+    </PageShell>
   );
 }

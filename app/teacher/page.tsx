@@ -4,8 +4,11 @@ import { redirect } from "next/navigation";
 
 import { LogoMark } from "@/components/brand/logo-mark";
 import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageShell } from "@/components/ui/page-shell";
 import { isOnboardingComplete, loadUserState } from "@/lib/onboarding";
 import { loadTeacherClasses } from "@/lib/teacher";
 import { createClient } from "@/lib/supabase/server";
@@ -55,70 +58,101 @@ export default async function TeacherPage() {
   const classes = await loadTeacherClasses(supabase, userId);
 
   return (
-    <main className="flex flex-1 justify-center bg-background p-8">
-      <div className="w-full max-w-lg">
-        {framed ? null : <LogoMark className="mb-12" />}
+    // Start-aligned at the Figma's own width for the class list — its teacher
+    // screens hang from the sidebar's edge rather than centring in the viewport.
+    // Without the shell there is no edge to hang from, so the un-onboarded case
+    // keeps the wizard's centred column and its own brand mark.
+    <PageShell
+      width={framed ? "3xl" : "lg"}
+      align={framed ? "start" : "center"}
+    >
+      {framed ? null : <LogoMark className="mb-12" />}
 
-        <h1 className="mb-10 font-serif text-2xl leading-relaxed text-foreground">
-          Chào mừng trở lại, {fullName}
-        </h1>
-
-        <div className="mb-4 flex items-baseline justify-between gap-4">
-          <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Lớp học của bạn
-          </h2>
-
-          {/* Only alongside a list. With no classes the empty state below makes
-              the same offer in the teacher's own words, and repeating it here
-              would give one action two buttons. */}
-          {classes && classes.length > 0 ? (
+      <PageHeader
+        title={`Chào mừng trở lại, ${fullName}`}
+        actions={
+          /* Only alongside a list. With no classes the empty state below makes
+             the same offer in the teacher's own words, and repeating it here
+             would give one action two buttons. */
+          classes && classes.length > 0 ? (
             <Button asChild variant="outline" size="sm">
               <Link href="/teacher/new">Tạo lớp học</Link>
             </Button>
-          ) : null}
-        </div>
+          ) : null
+        }
+      />
 
-        {classes === null ? (
-          // Distinct from "no classes" on purpose: the query failed, and a
-          // teacher told they have none would reasonably go and make another.
-          <Alert>
-            Chúng tôi chưa tải được danh sách lớp học của bạn. Vui lòng tải lại
-            trang.
-          </Alert>
-        ) : classes.length === 0 ? (
-          <Card>
-            <p className="mb-5 text-sm text-muted-foreground">
-              Bạn chưa tạo lớp học nào.
-            </p>
-            <Button asChild>
-              <Link href="/onboarding/class">Tạo lớp học đầu tiên</Link>
-            </Button>
-          </Card>
-        ) : (
-          <ul className="space-y-3">
-            {classes.map((entry) => (
-              <li key={entry.classId}>
-                <Card>
-                  <h3 className="mb-1 font-semibold text-foreground">
-                    {entry.className}
-                  </h3>
+      <h2 className="mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        Lớp học của bạn
+      </h2>
 
-                  <p className="text-sm text-muted-foreground">
-                    {`${entry.studentCount} học viên`}
-                    {entry.pendingCount > 0
-                      ? ` · ${entry.pendingCount} đang chờ`
-                      : null}
-                  </p>
+      {classes === null ? (
+        // Distinct from "no classes" on purpose: the query failed, and a
+        // teacher told they have none would reasonably go and make another.
+        <Alert>
+          Chúng tôi chưa tải được danh sách lớp học của bạn. Vui lòng tải lại
+          trang.
+        </Alert>
+      ) : classes.length === 0 ? (
+        <Card>
+          <p className="mb-5 text-sm text-muted-foreground">
+            Bạn chưa tạo lớp học nào.
+          </p>
+          <Button asChild>
+            <Link href="/onboarding/class">Tạo lớp học đầu tiên</Link>
+          </Button>
+        </Card>
+      ) : (
+        <ul className="space-y-3">
+          {classes.map((entry) => (
+            <li key={entry.classId}>
+              <Card>
+                {/* The Figma's class card leads with the name, prints the
+                    schedule under it, and puts the target band opposite —
+                    all three already came back with the roster counts and
+                    were being thrown away. `schedule_note` is display-only
+                    by the migration's own comment, so it is printed as the
+                    teacher typed it and nothing is derived from it. */}
+                <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                  <div className="min-w-0 grow basis-48">
+                    <h3 className="font-semibold break-words text-foreground">
+                      {entry.className}
+                    </h3>
 
-                  <Button asChild variant="outline" size="sm" className="mt-4">
-                    <Link href={`/teacher/${entry.classId}`}>Mở lớp</Link>
-                  </Button>
-                </Card>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </main>
+                    {entry.scheduleNote ? (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {entry.scheduleNote}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  {entry.targetBand === null ? null : (
+                    <div className="shrink-0 text-right">
+                      <p className="text-xs text-muted-foreground">
+                        Band mục tiêu
+                      </p>
+                      <Badge tone="primary" className="mt-1">
+                        {`IELTS ${entry.targetBand.toFixed(1)}`}
+                      </Badge>
+                    </div>
+                  )}
+                </div>
+
+                <p className="mt-3 text-sm text-muted-foreground">
+                  {`${entry.studentCount} học viên`}
+                  {entry.pendingCount > 0
+                    ? ` · ${entry.pendingCount} đang chờ`
+                    : null}
+                </p>
+
+                <Button asChild variant="outline" size="sm" className="mt-4">
+                  <Link href={`/teacher/${entry.classId}`}>Mở lớp</Link>
+                </Button>
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+    </PageShell>
   );
 }

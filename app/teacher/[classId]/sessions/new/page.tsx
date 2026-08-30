@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { SubmitButton } from "@/components/auth/submit-button";
 import { Alert } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageShell } from "@/components/ui/page-shell";
 import { requireTeacher } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
 import { createClient } from "@/lib/supabase/server";
@@ -77,12 +77,7 @@ export default async function NewSessionPage({
   const error = typeof query.error === "string" ? query.error : undefined;
 
   return (
-    <Frame classId={classId}>
-      <h1 className="mb-2 font-serif text-2xl leading-relaxed text-foreground">
-        Tạo buổi học
-      </h1>
-      <p className="mb-8 text-sm text-muted-foreground">{fields.className}</p>
-
+    <Frame classId={classId} className={fields.className}>
       {error ? <Alert className="mb-5">{error}</Alert> : null}
 
       <Card>
@@ -136,24 +131,33 @@ export default async function NewSessionPage({
 
 /**
  * The shell every state shares — including the error state, which keeps the
- * back link so a failed load does not strand anyone on a page with no exit.
+ * trail so a failed load does not strand anyone on a page with no exit. The
+ * class crumb is dropped only when the load failed and there is no name to put
+ * in it; `/teacher` still gets them out.
  */
 function Frame({
   classId,
+  className,
   children,
 }: {
   classId: string;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <main className="flex flex-1 justify-center bg-background p-8">
-      <div className="w-full max-w-lg">
-        <Button asChild variant="ghost" size="inline" className="mb-6 text-sm">
-          <Link href={`/teacher/${classId}`}>← Quay lại lớp học</Link>
-        </Button>
+    <PageShell width="2xl">
+      <PageHeader
+        breadcrumb={[
+          { label: "Lớp học", href: "/teacher" },
+          ...(className
+            ? [{ label: className, href: `/teacher/${classId}` }]
+            : []),
+          { label: "Tạo buổi học" },
+        ]}
+        title="Tạo buổi học"
+      />
 
-        {children}
-      </div>
-    </main>
+      {children}
+    </PageShell>
   );
 }

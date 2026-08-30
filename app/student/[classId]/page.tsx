@@ -6,6 +6,8 @@ import type { ReactNode } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageShell } from "@/components/ui/page-shell";
 import { ATTENDANCE_LABELS } from "@/lib/attendance";
 import { LABELS, isOfferedCourseType } from "@/lib/course-type";
 import { loadUserState } from "@/lib/onboarding";
@@ -226,6 +228,11 @@ export default async function StudentClassPage({
   if (result.kind === "error") {
     return (
       <Frame>
+        {/* No trail and no class name: the load that failed is the one that
+            would have supplied both, and the shell's own "Lớp học" link is
+            still the way out. */}
+        <PageHeader title="Lớp học" />
+
         {/* Not a 404: the query failed, and telling someone their class is
             gone when the database merely stumbled is the same mistake
             `StudentContext.classes` uses `null` to avoid. */}
@@ -256,20 +263,25 @@ export default async function StudentClassPage({
 
   return (
     <Frame>
-      <div className="mb-8">
-        <h1 className="mb-1 font-serif text-2xl leading-relaxed text-foreground">
-          {detail.className}
-        </h1>
-
-        {detail.teacherName ? (
-          <p className="text-sm text-muted-foreground">
-            Giáo viên:{" "}
-            <span className="font-medium text-foreground">
-              {detail.teacherName}
-            </span>
-          </p>
-        ) : null}
-      </div>
+      <PageHeader
+        breadcrumb={[
+          { label: "Lớp học", href: "/student" },
+          { label: detail.className },
+        ]}
+        title={detail.className}
+        meta={
+          detail.teacherName
+            ? [
+                <>
+                  Giáo viên:{" "}
+                  <span className="font-medium text-foreground">
+                    {detail.teacherName}
+                  </span>
+                </>,
+              ]
+            : undefined
+        }
+      />
 
       <Card>
         <dl className="space-y-3">
@@ -447,19 +459,14 @@ function Lesson({
 }
 
 /**
- * The shell every state shares — including the error state, which keeps the
- * back link so a failed load does not strand anyone on a page with no exit.
+ * The shell every state shares. Each state heads itself, because only the one
+ * that loaded knows the class's name; the way out of all of them is the
+ * shell's own navigation, which every page under `/student` is wrapped in.
  */
 function Frame({ children }: { children: ReactNode }) {
   return (
-    <main className="flex flex-1 justify-center bg-background p-8">
-      <div className="w-full max-w-lg">
-        <Button asChild variant="ghost" size="inline" className="mb-6 text-sm">
-          <Link href="/student">← Quay lại danh sách lớp</Link>
-        </Button>
-
-        {children}
-      </div>
-    </main>
+    <PageShell width="lg" align="center">
+      {children}
+    </PageShell>
   );
 }

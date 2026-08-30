@@ -41,9 +41,9 @@ export function NavItem({
       href={href}
       aria-current={current ? "page" : undefined}
       className={cn(
-        "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+        "flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
         current
-          ? "bg-secondary font-medium text-secondary-foreground"
+          ? "bg-secondary text-secondary-foreground"
           : "text-muted-foreground hover:bg-background hover:text-foreground",
       )}
     >

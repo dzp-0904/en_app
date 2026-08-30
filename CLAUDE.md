@@ -5,7 +5,7 @@ Read it in full before starting any milestone. Do not ask the user for anything
 that is already answered here, in the repository, in git history, or in the
 current milestone prompt.
 
-Last updated: 2026-08-30, after M20.
+Last updated: 2026-08-30, after M21.
 
 ---
 
@@ -602,13 +602,91 @@ known gaps.
 
 ---
 
+### M21 — `PENDING` Figma UI fidelity and UX polish
+- **Audited** (Phase A, before any edit): the Figma Make source for the shell
+  (`Layout.tsx`), teacher Dashboard, ClassDetail, CreateClass and student
+  Dashboard, against authentication, onboarding, all teacher screens, all
+  student screens and every shared primitive. **No P0.** Five P1 findings, one
+  P2, and a documented NO-CHANGE list.
+- **Implemented** — 10 files, 0 new components, 0 new dependencies:
+  - **Application titles moved off Lora.** Eight pages set their `h1` in
+    `font-serif text-2xl leading-relaxed`; the Figma uses Lora exactly twice in
+    thirteen screens (login pull quote, signup headline) and sets every
+    application title in Public Sans `text-2xl font-semibold`, which
+    `PageHeader` already renders. `app/page.tsx` and
+    `components/auth/brand-panel.tsx` **keep** Lora — that is the marketing
+    voice and is correct there.
+  - **`PageShell` adopted on all eight remaining pages**, at the Figma's own
+    widths: teacher screens start-aligned (`3xl` class list, `2xl` forms,
+    `4xl` lesson detail) because the Figma's teacher screens hang from the
+    sidebar's edge; student screens centred (`lg`) because its student screens
+    centre. `/teacher` alone is conditional — un-onboarded it has no shell to
+    hang from, so it keeps the wizard's centred `lg` column and its `LogoMark`.
+  - **`← Quay lại …` ghost buttons replaced by `PageHeader breadcrumb`** on all
+    eight. The Figma draws a trail above the title, and a `<nav
+    aria-label="Đường dẫn">` + `<ol>` is also the better control.
+  - **Both lesson-detail pages restructured to the Figma header**: the lesson
+    titles the page (`session.title ?? "Buổi học"`), the class names the trail,
+    and the date/time become two `meta` nodes instead of one `·`-joined string
+    so a narrow screen wraps between them.
+  - **Sidebar account block gained the Figma's 32px initials disc** —
+    `Avatar size="md" tone="primary"`, `aria-hidden` because the name is
+    printed beside it.
+  - **Teacher class cards now show schedule and target band.** Both were
+    already returned by `loadTeacherClasses` and discarded. Band is formatted
+    `IELTS 6.5` via `toFixed(1)`, matching the class-detail and join pages.
+  - **Nav item geometry** `px-3 py-2` → `px-3 py-2.5`, `font-medium` on both
+    states (P2).
+- **Defect found and fixed during verification:** `Breadcrumb` renders its
+  **last** item as `aria-current="page"` *text*, never a link. Trails that ended
+  on the class name therefore lost the link and mislabelled the current page.
+  Every trail now terminates on the page it is on. **This is a standing rule:
+  the last `Crumb` is the current page — never put an ancestor there.**
+- **Verified** against the production build with CDP:
+  - Tab transitions **11–13 ms** across three runs of all six hops — the M19
+    baseline is 11–12 ms. **No regression.** `app/teacher/[classId]/page.tsx`,
+    `lib/teacher.ts` and `components/ui/tabs.tsx` are untouched by M21.
+  - Responsive 1280/768/390/360/320 across 15 pages: **zero page-level
+    horizontal scroll everywhere.** Clipping is only the three known cases —
+    the invite `<code>` (`truncate` + Copy, by design), `sr-only` labels
+    (hidden by definition), and at 320px the `schedule_note` text input whose
+    *value* is longer than the field, which is native `<input>` scrolling and
+    not a layout defect.
+  - No-JS on all 10 changed pages: render, headings, breadcrumb links, forms;
+    the teacher lesson page still emits its **four** attendance submit buttons.
+  - M16/M19 query behaviour: `?student=` opens the panel, Close preserves
+    `filter=improving`, stale and malformed `?student=` still give the
+    Vietnamese alert rather than a 404, filter pills unchanged.
+  - Accessibility on all 9 signed-in pages: exactly one `h1`, exactly one
+    `aria-current="page"` crumb, every avatar `aria-hidden`, zero nameless
+    controls, zero unlabelled inputs.
+  - English-string sweep of the rendered text on 15 pages: clean.
+  - `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ · **20 routes**, no
+    debug or preview route.
+- **Limitations:**
+  - The attendance and score **write** paths were again not exercised — the only
+    seeded class is real production data and the standing instruction forbids
+    writing test data into it. `status-buttons.tsx` and every action file are
+    untouched by M21; M12/M13 coverage plus the no-JS render of the four
+    buttons is what stands behind them.
+  - The Figma's own teacher Dashboard also carries a "Students Needing
+    Attention" list and a "Recent Progress" feed. Both are driven by hardcoded
+    mock data in the Make source and neither has a query behind it here, so
+    neither was built. This is why `/teacher` uses `3xl` — the width the
+    Figma's class list actually occupies inside its 5xl dashboard — rather than
+    stretching one column across `5xl`.
+  - `get_metadata`, `get_screenshot` and `get_variable_defs` are unsupported for
+    Figma **Make** files. `get_design_context` on node `0:1` plus
+    `ReadMcpResourceTool` on the returned `file://figma/make/source/...` URIs is
+    the working route, and the Make source *is* the design.
+
 ## 14. Current project state (verified 2026-08-30)
 
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `6e5d9f8` — ":sparkles: update Vietnamese UI" |
-| `origin/main` | `6e5d9f8` — **in sync, M20 is committed and pushed** |
+| HEAD | `PENDING` — "feat: polish Figma UI fidelity" |
+| `origin/main` | `PENDING` — **in sync, M21 is committed and pushed** |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
 | Working tree | **clean** |
 | Routes | **20** (19 `page.tsx` + `app/auth/callback/route.ts`) |
@@ -661,6 +739,17 @@ Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
   up, and the cleanup verified.
 - **K.** Do not start the next milestone automatically. Stop after the requested
   one.
+- **L.** `PageShell` + `PageHeader` (+ `Breadcrumb`) are the frame for every
+  application page. A new page uses them; it does not hand-roll
+  `<main className="flex flex-1 justify-center …">` or a `← Quay lại` ghost
+  button. Teacher screens are start-aligned, student screens centred — that is
+  the Figma, not a preference.
+- **M.** The **last** `Crumb` in a `Breadcrumb` is the current page: it renders
+  as `aria-current="page"` text and is never a link. Never end a trail on an
+  ancestor — the link is lost and the marker lies.
+- **N.** Application titles are Public Sans `text-2xl font-semibold` via
+  `PageHeader`. Lora is the marketing voice and belongs only to `app/page.tsx`
+  and `components/auth/brand-panel.tsx`.
 
 Additional standing constraints from the user, still in force:
 

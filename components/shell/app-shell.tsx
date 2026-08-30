@@ -4,6 +4,7 @@ import { signOut } from "@/app/auth/actions";
 import { LogoMark } from "@/components/brand/logo-mark";
 import { ClassesMark } from "@/components/icons/classes-mark";
 import { NavItem } from "@/components/shell/nav-item";
+import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -112,14 +113,20 @@ export function AppShell({
 
         <div className="flex w-full items-center justify-between gap-3 border-t border-border pt-3 lg:mt-auto lg:block lg:pt-5">
           {/* Name and address, both already loaded to decide the role. Nothing
-              else about the account is read for this. */}
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-foreground">
-              {fullName}
-            </p>
-            {email ? (
-              <p className="truncate text-xs text-muted-foreground">{email}</p>
-            ) : null}
+              else about the account is read for this. The disc is the Figma's
+              32px initials avatar and is drawn from the name that is already
+              printed beside it, so it is `aria-hidden` and adds no new read. */}
+          <div className="flex min-w-0 items-center gap-2.5">
+            <Avatar name={fullName} size="md" tone="primary" />
+
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">
+                {fullName}
+              </p>
+              {email ? (
+                <p className="truncate text-xs text-muted-foreground">{email}</p>
+              ) : null}
+            </div>
           </div>
 
           <form action={signOut} className="shrink-0 lg:mt-2">

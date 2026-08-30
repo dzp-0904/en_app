@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { Alert } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageShell } from "@/components/ui/page-shell";
 import { ATTENDANCE_LABELS } from "@/lib/attendance";
 import { PERFORMANCE_LABELS, SKILL_LABELS } from "@/lib/lesson-log";
 import { loadUserState } from "@/lib/onboarding";
@@ -107,7 +107,7 @@ export default async function StudentLessonPage({
 
   if (membership.kind === "error") {
     return (
-      <Frame classId={classId}>
+      <Frame>
         {/* Not a 404: the query failed. Telling someone their lesson is gone
             when the database merely stumbled is the mistake this whole module
             uses a three-arm result to avoid. */}
@@ -133,7 +133,7 @@ export default async function StudentLessonPage({
 
   if (found.kind === "error") {
     return (
-      <Frame classId={classId}>
+      <Frame>
         <Alert>
           Chúng tôi chưa tải được buổi học này. Vui lòng tải lại trang.
         </Alert>
@@ -172,30 +172,35 @@ export default async function StudentLessonPage({
   ]);
 
   return (
-    <Frame classId={classId}>
-      <h1 className="font-serif text-2xl leading-relaxed text-foreground">
-        {detail.className}
-      </h1>
+    <Frame className={detail.className}>
+      {/* The lesson names the page and the class names the trail above it,
+          which is the Figma's header on every screen. An untitled lesson —
+          `title` is nullable — falls back to the word for what it is rather
+          than repeating the class name already in the crumb.
 
-      {/* Read on the class's own clock, by the same two functions the lesson
-          list and the teacher's page use. See `lib/time.ts`. */}
-      <p className="mt-1 text-sm text-muted-foreground">
-        {formatZonedDate(detail.timezone, lesson.startsAt)} ·{" "}
-        {formatZonedTime(detail.timezone, lesson.startsAt)} –{" "}
-        {formatZonedTime(detail.timezone, lesson.endsAt)}
-      </p>
-
-      {lesson.title ? (
-        <p className="mt-3 text-foreground">{lesson.title}</p>
-      ) : null}
+          The date and the times are read on the class's own clock, by the same
+          two functions the lesson list and the teacher's page use. See
+          `lib/time.ts`. */}
+      <PageHeader
+        breadcrumb={[
+          { label: "Lớp học", href: "/student" },
+          { label: detail.className, href: `/student/${classId}` },
+          { label: "Buổi học" },
+        ]}
+        title={lesson.title ?? "Buổi học"}
+        meta={[
+          formatZonedDate(detail.timezone, lesson.startsAt),
+          `${formatZonedTime(detail.timezone, lesson.startsAt)} – ${formatZonedTime(detail.timezone, lesson.endsAt)}`,
+        ]}
+      />
 
       {lesson.status === "cancelled" ? (
-        <p className="mt-3 text-sm text-muted-foreground">
+        <p className="-mt-2 mb-6 text-sm text-muted-foreground">
           Buổi học này đã bị hủy.
         </p>
       ) : null}
 
-      <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+      <h2 className="mt-4 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
         Điểm danh của tôi
       </h2>
 
@@ -350,25 +355,31 @@ function Note({ note }: { note: StudentNote }) {
 }
 
 /**
- * The shell every state shares — including the error states, which keep the
- * back link so a failed load does not strand anyone on a page with no exit.
+ * The shell every state shares. The error states head themselves, because they
+ * have neither a lesson nor a class name to head the page with, and their trail
+ * stops at the list — naming a class this page could not load would be putting
+ * a word in the crumb that nothing on the page stands behind.
  */
 function Frame({
-  classId,
+  className,
   children,
 }: {
-  classId: string;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <main className="flex flex-1 justify-center bg-background p-8">
-      <div className="w-full max-w-lg">
-        <Button asChild variant="ghost" size="inline" className="mb-6 text-sm">
-          <Link href={`/student/${classId}`}>← Quay lại lớp học</Link>
-        </Button>
+    <PageShell width="lg" align="center">
+      {className ? null : (
+        <PageHeader
+          breadcrumb={[
+            { label: "Lớp học", href: "/student" },
+            { label: "Buổi học" },
+          ]}
+          title="Buổi học"
+        />
+      )}
 
-        {children}
-      </div>
-    </main>
+      {children}
+    </PageShell>
   );
 }

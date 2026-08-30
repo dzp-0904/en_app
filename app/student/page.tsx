@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageShell } from "@/components/ui/page-shell";
 import { loadUserState } from "@/lib/onboarding";
 
 export const metadata: Metadata = {
@@ -50,64 +52,60 @@ export default async function StudentPage() {
   const { fullName, classes } = state.student;
 
   return (
-    <main className="flex flex-1 justify-center bg-background p-8">
-      <div className="w-full max-w-lg">
-        <h1 className="mb-10 font-serif text-2xl leading-relaxed text-foreground">
-          Chào {fullName}
-        </h1>
+    <PageShell width="lg" align="center">
+      <PageHeader title={`Chào ${fullName}`} />
 
-        <h2 className="mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Lớp học của bạn
-        </h2>
+      <h2 className="mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        Lớp học của bạn
+      </h2>
 
-        {classes === null ? (
-          // Distinct from "no classes" on purpose: the query failed, and
-          // telling someone who has joined a class that they have not is the
-          // exact bug this page was written to fix.
-          <Alert>
-            Chúng tôi chưa tải được lớp học của bạn. Vui lòng tải lại trang.
-          </Alert>
-        ) : classes.length === 0 ? (
-          <Card>
-            <p className="text-sm text-muted-foreground">
-              Bạn chưa tham gia lớp học nào. Khi giáo viên gửi liên kết mời,
-              hãy mở liên kết đó để tham gia.
-            </p>
-          </Card>
-        ) : (
-          <ul className="space-y-3">
-            {classes.map((entry) => (
-              <li key={entry.membershipId}>
-                <Card>
-                  <h3 className="mb-1 font-semibold text-foreground">
-                    {entry.className}
-                  </h3>
+      {classes === null ? (
+        // Distinct from "no classes" on purpose: the query failed, and
+        // telling someone who has joined a class that they have not is the
+        // exact bug this page was written to fix.
+        <Alert>
+          Chúng tôi chưa tải được lớp học của bạn. Vui lòng tải lại trang.
+        </Alert>
+      ) : classes.length === 0 ? (
+        <Card>
+          <p className="text-sm text-muted-foreground">
+            Bạn chưa tham gia lớp học nào. Khi giáo viên gửi liên kết mời,
+            hãy mở liên kết đó để tham gia.
+          </p>
+        </Card>
+      ) : (
+        <ul className="space-y-3">
+          {classes.map((entry) => (
+            <li key={entry.membershipId}>
+              <Card>
+                <h3 className="mb-1 font-semibold text-foreground">
+                  {entry.className}
+                </h3>
 
-                  {entry.teacherName ? (
-                    <p className="text-sm text-muted-foreground">
-                      Giáo viên: {entry.teacherName}
-                    </p>
-                  ) : null}
+                {entry.teacherName ? (
+                  <p className="text-sm text-muted-foreground">
+                    Giáo viên: {entry.teacherName}
+                  </p>
+                ) : null}
 
-                  {entry.joinedAt ? (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Tham gia {JOINED.format(new Date(entry.joinedAt))}
-                    </p>
-                  ) : null}
+                {entry.joinedAt ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Tham gia {JOINED.format(new Date(entry.joinedAt))}
+                  </p>
+                ) : null}
 
-                  {/* A plain link, not a clickable card: the whole surface
-                      being a target would swallow anything added to it later,
-                      and a link is what a keyboard and a screen reader can
-                      actually find. */}
-                  <Button asChild variant="outline" size="sm" className="mt-4">
-                    <Link href={`/student/${entry.classId}`}>Mở lớp học</Link>
-                  </Button>
-                </Card>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </main>
+                {/* A plain link, not a clickable card: the whole surface
+                    being a target would swallow anything added to it later,
+                    and a link is what a keyboard and a screen reader can
+                    actually find. */}
+                <Button asChild variant="outline" size="sm" className="mt-4">
+                  <Link href={`/student/${entry.classId}`}>Mở lớp học</Link>
+                </Button>
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+    </PageShell>
   );
 }
