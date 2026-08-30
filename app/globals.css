@@ -57,8 +57,10 @@
   --color-track: var(--track);
   --color-green: var(--green);
   --color-green-light: var(--green-light);
+  --color-green-dark: var(--green-dark);
   --color-orange: var(--orange);
   --color-orange-light: var(--orange-light);
+  --color-orange-dark: var(--orange-dark);
 
   --font-sans: var(--font-public-sans);
   --font-serif: var(--font-lora);
@@ -143,6 +145,27 @@
   --green-light: #edfaf4;
   --orange: #e8834a;
   --orange-light: #fef3eb;
+
+  /*
+   * Text-on-tint versions of the two accent colours.
+   *
+   * The Figma writes its green and orange badges in the same hue as the fill
+   * beside them — #3ba876 on #edfaf4 is 2.78:1 and #e8834a on #fef3eb is
+   * 2.47:1, both far under the 4.5:1 that 12px badge text needs. Darkening the
+   * word rather than the tint is the repository's existing answer to this: it
+   * is what `--destructive` (#b42318) already is, a foreground substituted for
+   * a Figma red that could not carry text.
+   *
+   * Chosen as the smallest darkening that clears AA, so the badges still read
+   * as the Figma's green and orange rather than as new colours: #1a7f52 gives
+   * 4.67:1 on green-light and #a9520e gives 4.93:1 on orange-light.
+   *
+   * Deliberately separate tokens. `--green` and `--orange` stay exactly as the
+   * Figma sets them and keep their existing jobs — progress fills, the
+   * onboarding stepper, the join page's tick — none of which is small text.
+   */
+  --green-dark: #1a7f52;
+  --orange-dark: #a9520e;
 
   --border: #e8e6de;
   --input: #e8e6de;

@@ -29,26 +29,39 @@ import { cn } from "@/lib/utils";
  * text and there is no icon-only mode, so the state survives greyscale, a
  * screen reader, and a colour-blind reader alike.
  *
- * CONTRAST. Two tones already resolve to the repository's accessible values —
- * `neutral` carries `--muted-foreground` rather than the Figma's #8A8FA8, and
- * `destructive` carries #B42318 rather than #EF4444 — and both clear AA (7.18:1
- * and 6.03:1). The other three are the Figma's own pairs and do not: green
- * measures 2.78:1, orange 2.47:1 and primary 4.22:1 against their tints, all
- * short of the 4.5:1 that 12px text needs. Darkening those three foregrounds is
- * the same repair the palette already applies twice over, but it is a change to
- * a colour the design specifies, so it is written up for a decision rather than
- * made here. Nothing renders a Badge yet, so nothing inaccessible ships ahead
- * of that decision.
+ * CONTRAST. Four of the five tones clear AA at 12px. `neutral` and
+ * `destructive` always did, because they already resolve to the repository's
+ * accessible substitutions rather than the Figma's own #8A8FA8 and #EF4444
+ * (6.62:1 and 6.03:1).
+ *
+ * `green` and `orange` did not. The Figma writes each badge in the same hue as
+ * its tint, which measures 2.78:1 and 2.47:1, so both now carry `--green-dark`
+ * and `--orange-dark`: foregrounds darkened just far enough to reach 4.67:1 and
+ * 4.93:1 while still reading as the Figma's green and orange. That is the
+ * repair `--destructive` already is, applied twice more.
+ *
+ * `neutral`'s tint moved too, though for a different reason. The Figma fills it
+ * with #F7F6F1, which is also what `TableRow` paints a hovered or selected row,
+ * so on the roster a `Steady` badge dissolved into the row under the pointer
+ * while its neighbours stayed pills. It sits on `--muted` instead — one step
+ * darker, still the same family, and it costs 0.56 of a contrast ratio it has
+ * to spare.
+ *
+ * `primary` is the exception and is left as the Figma sets it, at 4.22:1.
+ * Nothing renders it: the three tones the roster's status vocabulary needs are
+ * green, neutral and orange. The same pair already ships in `nav-item.tsx`'s
+ * active state, so changing it here would either fix half of a problem or drag
+ * the sidebar into a milestone about one page. It is still open.
  */
 const badgeVariants = cva(
   "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
   {
     variants: {
       tone: {
-        neutral: "bg-background text-muted-foreground",
+        neutral: "bg-muted text-muted-foreground",
         primary: "bg-secondary text-secondary-foreground",
-        green: "bg-green-light text-green",
-        orange: "bg-orange-light text-orange",
+        green: "bg-green-light text-green-dark",
+        orange: "bg-orange-light text-orange-dark",
         destructive: "bg-destructive-light text-destructive",
       },
     },

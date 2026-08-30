@@ -39,7 +39,12 @@ function FilterPills({
 }) {
   return (
     <nav data-slot="filter-pills" aria-label={label} {...props}>
-      <ul className={cn("flex flex-wrap items-center gap-2", className)}>
+      <ul
+        className={cn(
+          "flex flex-wrap items-center gap-x-1 gap-y-2",
+          className,
+        )}
+      >
         {items.map((item) => (
           <li key={item.href}>
             <Link

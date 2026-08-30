@@ -15,10 +15,18 @@ import { Breadcrumb, type Crumb } from "@/components/ui/breadcrumb";
  * Public Sans at `text-2xl font-semibold`. Existing pages are not rewritten to
  * use this component; they adopt it as each is rebuilt.
  *
- * The metadata row is a list of nodes rather than one string: the Figma spaces
- * its facts with `gap-4` rather than a separator character, and handing it
- * separate items lets the row wrap between facts on a narrow screen instead of
- * breaking one of them in half.
+ * The trail sits `mb-1` above the title rather than floating free of it: the
+ * Figma groups the two as one block and spaces them by 4px, so the crumb reads
+ * as a label on the heading beneath it rather than as its own band.
+ *
+ * The metadata row is a list of nodes rather than one string, so it can wrap
+ * between facts on a narrow screen instead of breaking one of them in half.
+ *
+ * It is spaced rather than punctuated. The Class Detail screen writes a literal
+ * `·` between its facts on top of a `gap-4`, which is belt and braces on a
+ * fixed-width mock and neither on a real one: the separator is a text node, so
+ * it can wrap onto a line by itself, and a screen reader reads it out. The gap
+ * does the same job at every width without adding a character to the page.
  *
  * WRAPPING. The Figma pins the actions to the right of the title on one line
  * and never asks what happens at 390px, where a title and two buttons do not
@@ -48,7 +56,7 @@ function PageHeader({
 }) {
   return (
     <header data-slot="page-header" className={cn("mb-6", className)} {...props}>
-      {breadcrumb?.length ? <Breadcrumb items={breadcrumb} className="mb-5" /> : null}
+      {breadcrumb?.length ? <Breadcrumb items={breadcrumb} className="mb-1" /> : null}
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 grow basis-64">

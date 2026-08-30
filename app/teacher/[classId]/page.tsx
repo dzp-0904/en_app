@@ -6,40 +6,60 @@ import type { ReactNode } from "react";
 import { inviteStudentByEmail } from "@/app/onboarding/actions";
 import { SubmitButton } from "@/components/auth/submit-button";
 import { CopyField } from "@/components/onboarding/copy-field";
+import { TagEditor } from "@/components/roster/tag-editor";
 import { Alert } from "@/components/ui/alert";
+import { Avatar } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { FilterPills } from "@/components/ui/filter-pills";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/ui/page-header";
+import { PageShell } from "@/components/ui/page-shell";
+import { ProgressBar } from "@/components/ui/progress-bar";
+import { StatCard } from "@/components/ui/stat-card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tabs } from "@/components/ui/tabs";
+import { ATTENDANCE_LABELS, type AttendanceStatus } from "@/lib/attendance";
 import { LABELS, isOfferedCourseType } from "@/lib/course-type";
+import { PERFORMANCE_LABELS, SKILL_LABELS } from "@/lib/lesson-log";
 import { loadUserState } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
+import {
+  BAND_FIELDS,
+  BAND_FIELD_LABELS,
+  BAND_SKILLS,
+  BAND_VALUES,
+  MEMBER_STATUS_LABELS,
+  SCORE_ENTRY_TYPE_LABELS,
+  formatBand,
+  isBandScored,
+  type MemberStatus,
+} from "@/lib/score";
 import { joinUrl } from "@/lib/site-url";
+import { TAG_SUGGESTIONS } from "@/lib/standing";
 import { createClient } from "@/lib/supabase/server";
 import {
+  loadClassBands,
   loadClassSessions,
   loadStudentOverview,
   loadTeacherClass,
   type ClassSession,
+  type MemberBands,
   type RosterEntry,
   type StudentOverview,
   type TeacherClassDetail,
 } from "@/lib/teacher";
 import { formatZonedDate, formatZonedTime } from "@/lib/time";
 
-import { TagEditor } from "@/components/roster/tag-editor";
-import { ATTENDANCE_LABELS } from "@/lib/attendance";
-import { PERFORMANCE_LABELS, SKILL_LABELS } from "@/lib/lesson-log";
-import {
-  BAND_FIELDS,
-  BAND_FIELD_LABELS,
-  BAND_VALUES,
-  MEMBER_STATUS_LABELS,
-  SCORE_ENTRY_TYPE_LABELS,
-  formatBand,
-  isBandScored,
-} from "@/lib/score";
-import { TAG_SUGGESTIONS } from "@/lib/standing";
 import {
   cancelInvitation,
   removeStudent,
@@ -52,16 +72,24 @@ import {
  * One of the teacher's classes: what it is, how to invite people to it, and who
  * is in it.
  *
- * The roster is the point. Every table this milestone deliberately leaves alone
- * — attendance, scores, lesson logs, homework submissions — hangs off
- * `class_members.id`, so this list is the thing all of them will later be
- * recorded against. Showing it is what turns a class from a row created during
- * onboarding into something a teacher can work with.
+ * The roster is the point, and this milestone gives it the Figma's own shape —
+ * a table of students with their bands, skills and standing beside them, over
+ * the stacked cards it used to be. Nothing about what the page is allowed to
+ * read changed with it.
  *
  * Identity comes from `loadUserState`, exactly as `/teacher` and the student
  * pages do. Ownership comes from `loadTeacherClass`, which cannot return a
  * class the caller does not own — the `classId` in the URL selects a row, it
- * does not authorise one.
+ * does not authorise one. The three selectors this page now carries in its
+ * query string (`tab`, `filter`, `student`) are selectors on the same footing:
+ * every one of them narrows what is drawn from data the class check has already
+ * released, and none of them can widen it.
+ *
+ * STATE LIVES IN THE URL. Which tab is open, which filter is applied and which
+ * student's panel is expanded are all query parameters reached by `<Link>`,
+ * because that is what keeps the page a Server Component that works with
+ * JavaScript switched off. A `useState` tab, which is what the Figma prototype
+ * uses, would have made the roster unreachable without scripting.
  */
 
 export const metadata: Metadata = {
@@ -80,33 +108,105 @@ function asDate(iso: string): Date {
   return new Date(`${iso}T00:00:00Z`);
 }
 
-/** The facts worth showing, skipping every column this class left blank. */
-function factsFor(detail: TeacherClassDetail): { term: string; value: string }[] {
-  const facts: { term: string; value: string }[] = [];
+/** Which panel of the class is open. `students` is the default and is unwritten. */
+type Tab = "students" | "lessons" | "info";
 
-  const course = isOfferedCourseType(detail.courseType)
-    ? LABELS[detail.courseType]
-    : detail.courseTypeOther;
+const TABS: { id: Tab; label: string }[] = [
+  { id: "students", label: "Students" },
+  { id: "lessons", label: "Lessons" },
+  { id: "info", label: "Class Info" },
+];
 
-  if (course) facts.push({ term: "Course", value: course });
-
-  if (detail.targetBand !== null) {
-    facts.push({ term: "Target", value: `IELTS ${detail.targetBand.toFixed(1)}` });
-  }
-
-  facts.push({
-    term: "Dates",
-    value: detail.endDate
-      ? `${DATE.format(asDate(detail.startDate))} – ${DATE.format(asDate(detail.endDate))}`
-      : `From ${DATE.format(asDate(detail.startDate))}`,
-  });
-
-  if (detail.scheduleNote) {
-    facts.push({ term: "Schedule", value: detail.scheduleNote });
-  }
-
-  return facts;
+function isTab(value: string): value is Tab {
+  return TABS.some((tab) => tab.id === value);
 }
+
+/** Which slice of the roster is shown. `all` is the default and is unwritten. */
+type Filter = "all" | MemberStatus;
+
+const FILTERS: Filter[] = ["all", "improving", "stable", "needs_attention"];
+
+function isFilter(value: string): value is Filter {
+  return (FILTERS as string[]).includes(value);
+}
+
+/**
+ * This page's own URL carrying a different set of selectors.
+ *
+ * Every default is left out rather than written down, so the plain
+ * `/teacher/<id>` a teacher arrives on is the same URL the "Students" tab and
+ * the "All students" pill point at — one address for one view, and no growing
+ * tail of `?tab=students&filter=all` on the way back to where you started.
+ */
+function hrefFor(
+  classId: string,
+  selectors: { tab?: Tab; filter?: Filter; student?: string },
+  hash?: string,
+): string {
+  const query = new URLSearchParams();
+
+  if (selectors.tab && selectors.tab !== "students") {
+    query.set("tab", selectors.tab);
+  }
+  if (selectors.filter && selectors.filter !== "all") {
+    query.set("filter", selectors.filter);
+  }
+  if (selectors.student) {
+    query.set("student", selectors.student);
+  }
+
+  const search = query.toString();
+
+  return `/teacher/${classId}${search ? `?${search}` : ""}${hash ? `#${hash}` : ""}`;
+}
+
+/** Where a student's row sits, so closing their panel returns to it. */
+function anchorFor(entry: RosterEntry): string {
+  return `student-${entry.membershipId}`;
+}
+
+/** Where the open panel sits, so opening one lands on it rather than the table. */
+const PANEL_ANCHOR = "student-panel";
+
+/** The id every tag input points at; the list itself is rendered once. */
+const SUGGESTION_LIST = "tag-suggestions";
+
+/** Whoever the row is about, however much of them it knows. */
+function nameOf(entry: RosterEntry): string {
+  return entry.name ?? entry.email ?? "This student";
+}
+
+/**
+ * The Figma's status colours, by the value the database actually stores.
+ *
+ * `improving` is green and `needs_attention` is orange, exactly as the design
+ * sets them. `stable` is the Figma's grey-on-cream, which is what `neutral`
+ * already is. The word is always printed beside the tint, so none of this is
+ * the only thing carrying the meaning.
+ */
+const STATUS_TONES: Record<MemberStatus, "green" | "neutral" | "orange"> = {
+  improving: "green",
+  stable: "neutral",
+  needs_attention: "orange",
+};
+
+/**
+ * The four attendance values, tinted.
+ *
+ * All four, and four distinct tones, because the difference between them is
+ * load-bearing — `excused` is the one that takes a lesson out of the reckoning
+ * entirely, and collapsing it into `absent` would lose that. `ATTENDANCE_LABELS`
+ * supplies the word in every case.
+ */
+const ATTENDANCE_TONES: Record<
+  AttendanceStatus,
+  "green" | "orange" | "destructive" | "neutral"
+> = {
+  present: "green",
+  late: "orange",
+  absent: "destructive",
+  excused: "neutral",
+};
 
 export default async function TeacherClassPage({
   params,
@@ -153,14 +253,6 @@ export default async function TeacherClassPage({
   const { detail } = result;
   const link = detail.inviteCode ? await joinUrl(detail.inviteCode) : null;
 
-  // Loaded separately from the class itself so that a failure here costs the
-  // teacher the lesson list and nothing else — the facts, the invitation link
-  // and the roster above are already in hand. `null` is that failure, and it is
-  // deliberately not `[]`: "no lessons have been recorded yet" is a claim about
-  // the class, and the page is not entitled to make it on the strength of a
-  // query that did not come back.
-  const sessions = await loadClassSessions(supabase, detail.classId);
-
   // Every action on this page — inviting, removing, cancelling, resending —
   // reports failure the same way: by redirecting back with the message
   // attached, so the page stays a Server Component and each form works without
@@ -169,18 +261,53 @@ export default async function TeacherClassPage({
   const query = await searchParams;
   const error = typeof query.error === "string" ? query.error : undefined;
 
+  const tab =
+    typeof query.tab === "string" && isTab(query.tab) ? query.tab : "students";
+
+  // Anything else in `?filter=` is treated as no filter rather than as an empty
+  // roster: a mistyped parameter should not read as "this class has nobody in
+  // it".
+  const filter =
+    typeof query.filter === "string" && isFilter(query.filter)
+      ? query.filter
+      : "all";
+
   // Which student's overview is open, if any. A query parameter rather than a
-  // route: the panel is one card of this page expanded, so it belongs to this
+  // route: the panel is one part of this page expanded, so it belongs to this
   // page's URL. It is a selector and not a credential — `loadStudentOverview`
   // re-proves the membership against the class in the database before it reads
   // anything, and this page has already proved the class.
   const selected = typeof query.student === "string" ? query.student : undefined;
 
-  // Nothing is loaded unless a student is selected, so the roster costs exactly
-  // what it did before this milestone for every teacher who has not opened one.
-  const overview = selected
-    ? await loadStudentOverview(supabase, detail.classId, selected)
-    : null;
+  // The same test the session page makes before showing bands at all. A target
+  // band is an IELTS goal, and a class that scores on nothing has no use for
+  // one — `setTargetBand` refuses the write for the same reason, so the control
+  // is absent here rather than present and rejected.
+  const banded = isBandScored(detail.courseType);
+
+  // Three reads that the class check has already paid for the right to make,
+  // fired together because none depends on another.
+  //
+  // `loadClassBands` is the same call the session page makes, against the same
+  // two views, for the same class: it is where "current band", "skills" and
+  // "status" come from, and it is the only reason those columns can exist
+  // without this page working any of them out for itself. Nothing is loaded for
+  // an unbanded class, which has no bands to load.
+  //
+  // Nothing is loaded for the panel unless a student is selected, so the roster
+  // costs a teacher who has not opened one exactly what it did before.
+  const [sessions, bands, overview] = await Promise.all([
+    // Loaded separately from the class itself so that a failure here costs the
+    // teacher the lesson list and nothing else. `null` is that failure, and it
+    // is deliberately not `[]`: "no lessons have been recorded yet" is a claim
+    // about the class, and the page is not entitled to make it on the strength
+    // of a query that did not come back.
+    loadClassSessions(supabase, detail.classId),
+    banded ? loadClassBands(supabase, detail.classId) : Promise.resolve(null),
+    selected
+      ? loadStudentOverview(supabase, detail.classId, selected)
+      : Promise.resolve(null),
+  ]);
 
   // A membership from another class, a removed one, an invitation that was
   // never claimed and a random uuid all arrive here as the same `not-found`,
@@ -197,202 +324,418 @@ export default async function TeacherClassPage({
   const students = detail.roster.filter((entry) => entry.status === "joined");
   const pending = detail.roster.filter((entry) => entry.status === "invited");
 
-  // The same test the session page makes before showing bands at all. A target
-  // band is an IELTS goal, and a class that scores on nothing has no use for
-  // one — `setTargetBand` refuses the write for the same reason, so the control
-  // is absent here rather than present and rejected.
-  const banded = isBandScored(detail.courseType);
+  // Bands may be unavailable for two different reasons and only one of them is
+  // a failure: an unbanded course has none to show, and a query that did not
+  // come back has none to show *yet*. The columns are dropped either way, and
+  // the second case says so rather than letting a teacher read blank cells as
+  // "nobody has been assessed".
+  const standing = banded && bands !== null ? bands : null;
+
+  const facts = factsFor(detail);
+
+  const roster =
+    standing === null
+      ? students
+      : students.filter(
+          (entry) => filter === "all" || statusOf(standing, entry) === filter,
+        );
+
+  const stats: { label: string; value: string }[] = [
+    { label: "Students", value: String(students.length) },
+  ];
+
+  if (standing !== null) {
+    // Counts of a value the database decided, not a judgement made here. The
+    // status itself is `v_member_performance_status`'s; tallying how many rows
+    // carry it is the same kind of arithmetic as counting the roster.
+    //
+    // The Figma's other two cards, "Avg. Band" and "Avg. Homework", are absent
+    // and are meant to be — see the note on `factsFor` below.
+    for (const status of ["improving", "needs_attention"] as const) {
+      stats.push({
+        label: MEMBER_STATUS_LABELS[status],
+        value: String(
+          students.filter((entry) => statusOf(standing, entry) === status)
+            .length,
+        ),
+      });
+    }
+  }
 
   return (
-    <Frame>
-      {/* Same pairing as the list's "Create class": the heading names what you
-          are looking at, the button beside it is the one thing you can do to
-          it. Editing is a page rather than an inline form because the fields
-          are the whole of `ClassForm`, not a single value. */}
-      <div className="mb-8 flex items-baseline justify-between gap-4">
-        <h1 className="font-serif text-2xl leading-relaxed text-foreground">
-          {detail.className}
-        </h1>
+    <PageShell width="5xl">
+      <PageHeader
+        breadcrumb={[
+          // The Figma's first crumb says "Dashboard". EduTrack has no
+          // dashboard, deliberately and in as many words in `app-shell.tsx`;
+          // the place this page came from is the class list, and that is what
+          // the crumb is named after. It also carries the page's old "← Back to
+          // classes" link, which the trail replaces rather than drops.
+          { label: "Classes", href: "/teacher" },
+          { label: detail.className },
+        ]}
+        title={detail.className}
+        meta={facts
+          .map((fact) => fact.summary)
+          .filter((summary): summary is string => summary !== undefined)}
+        actions={
+          <>
+            <Button asChild variant="outline">
+              <Link href={`/teacher/${detail.classId}/edit`}>Edit class</Link>
+            </Button>
 
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/teacher/${detail.classId}/edit`}>Edit class</Link>
-        </Button>
-      </div>
+            <Button asChild>
+              <Link href={hrefFor(detail.classId, { tab: "info" }, "invite")}>
+                Invite students
+              </Link>
+            </Button>
+          </>
+        }
+      />
 
       {notice ? <Alert className="mb-5">{notice}</Alert> : null}
 
-      <Card>
-        <dl className="space-y-3">
-          {factsFor(detail).map((fact) => (
-            <div key={fact.term} className="flex gap-4 text-sm">
-              <dt className="w-24 shrink-0 text-muted-foreground">
-                {fact.term}
-              </dt>
-              <dd className="text-foreground">{fact.value}</dd>
-            </div>
-          ))}
-        </dl>
-      </Card>
-
-      <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Invite students
-      </h2>
-
-      {link ? (
-        <Card>
-          <CopyField label="Class invitation link" value={link} />
-          <p className="-mt-1 mb-6 text-sm text-muted-foreground">
-            Anyone with this link can join this class.
-          </p>
-
-          {/* The same action the wizard's last step uses, bound to the class in
-              the URL rather than to whichever class happens to be newest. That
-              binding is not what authorises the write — the action re-reads the
-              class filtered by the authenticated teacher's id before it does
-              anything. Without this form, a teacher with more than one class
-              would have no way to invite by email at all, because the step that
-              used to offer it now sends them here. */}
-          <form
-            action={inviteStudentByEmail.bind(null, detail.classId, "class")}
-            className="space-y-1.5"
-          >
-            <Label htmlFor="email">Or invite by email</Label>
-            <div className="flex items-start gap-2">
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="off"
-                placeholder="student@email.com"
-                className="flex-1"
-                required
-              />
-              <SubmitButton pendingLabel="Sending…">Send</SubmitButton>
-            </div>
-          </form>
-        </Card>
-      ) : (
-        // No email form either: the invitation email carries the link, so with
-        // no usable code there is nothing to send.
-        <Card>
-          <p className="text-sm text-muted-foreground">
-            This class has no active invitation link right now. Refresh the page
-            in a moment to check again.
-          </p>
-        </Card>
-      )}
-
-      <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Lessons
-      </h2>
-
-      {sessions === null ? (
-        <Alert>
-          We couldn&apos;t load this class&apos;s lessons just now. Please
-          refresh the page.
+      {banded && bands === null ? (
+        <Alert className="mb-5">
+          We couldn&apos;t load this class&apos;s bands and progress just now.
+          The list below is still your class; please refresh the page to see
+          where everyone stands.
         </Alert>
-      ) : sessions.length === 0 ? (
-        <Card>
-          <p className="text-sm text-muted-foreground">
-            No lessons have been recorded yet.
-          </p>
-        </Card>
-      ) : (
-        <ul className="space-y-3">
-          {sessions.map((session, index) => (
-            <li key={session.sessionId}>
-              <Card>
-                <Lesson
-                  session={session}
-                  classId={detail.classId}
-                  timezone={detail.timezone}
-                  ordinal={index + 1}
-                />
-              </Card>
-            </li>
-          ))}
-        </ul>
-      )}
+      ) : null}
 
-      {/* Offered in all three states, including the failed one: whether the
-          list could be read has no bearing on whether a lesson can be added. */}
-      <div className="mt-4">
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/teacher/${detail.classId}/sessions/new`}>
-            Create lesson
-          </Link>
-        </Button>
+      <div className={`mb-6 grid gap-4 ${STAT_COLUMNS[stats.length] ?? ""}`}>
+        {stats.map((stat) => (
+          <StatCard key={stat.label} label={stat.label} value={stat.value} />
+        ))}
       </div>
 
-      <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Students ({students.length})
-      </h2>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <Tabs
+          label="Class views"
+          items={TABS.map((item) => ({
+            label: item.label,
+            href: hrefFor(detail.classId, { tab: item.id, filter }),
+            current: item.id === tab,
+          }))}
+        />
 
-      {/* One list for every card below. A datalist is a suggestion and not a
-          constraint — both columns are free text, and a teacher typing "Task 2
-          structure" is the case these fields exist for. */}
-      <datalist id={SUGGESTION_LIST}>
-        {TAG_SUGGESTIONS.map((suggestion) => (
-          <option key={suggestion} value={suggestion} />
-        ))}
-      </datalist>
+        {/* Only where they can act on something. A filter needs a status to
+            filter by, and an unbanded class — or one whose standing did not
+            load — has none. */}
+        {tab === "students" && standing !== null ? (
+          <FilterPills
+            label="Filter students by progress"
+            items={FILTERS.map((item) => ({
+              label:
+                item === "all" ? "All students" : MEMBER_STATUS_LABELS[item],
+              href: hrefFor(detail.classId, { filter: item }),
+              current: item === filter,
+            }))}
+          />
+        ) : null}
+      </div>
 
-      {students.length === 0 ? (
-        <Card>
-          <p className="text-sm text-muted-foreground">
-            Nobody has joined yet. Share the invitation link above.
-          </p>
-        </Card>
-      ) : (
-        <ul className="space-y-3">
-          {students.map((entry) => (
-            // The anchor the overview links carry, so opening and closing a
-            // panel returns the reader to the card they pressed rather than to
-            // the top of a long roster.
-            <li key={entry.membershipId} id={anchorFor(entry)}>
-              <Card>
-                <Person entry={entry} />
-                {entry.joinedAt ? (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Joined {DATE.format(new Date(entry.joinedAt))}
-                  </p>
+      {tab === "students" ? (
+        <Students
+          classId={detail.classId}
+          timezone={detail.timezone}
+          banded={banded}
+          filter={filter}
+          link={link}
+          roster={roster}
+          rosterTotal={students.length}
+          pending={pending}
+          standing={standing}
+          selected={
+            overview?.kind === "ok"
+              ? (students.find(
+                  (entry) =>
+                    entry.membershipId === overview.overview.membershipId,
+                ) ?? null)
+              : null
+          }
+          overview={overview?.kind === "ok" ? overview.overview : null}
+        />
+      ) : null}
+
+      {tab === "lessons" ? (
+        <Lessons
+          classId={detail.classId}
+          timezone={detail.timezone}
+          sessions={sessions}
+        />
+      ) : null}
+
+      {tab === "info" ? (
+        <ClassInfo classId={detail.classId} facts={facts} link={link} />
+      ) : null}
+    </PageShell>
+  );
+}
+
+/**
+ * How wide the statistics row runs, by how many statistics there are.
+ *
+ * The Figma sets a flat `grid-cols-4`, which only reads as designed with four
+ * cards in it. EduTrack has one or three, so the count picks the track list
+ * instead of a fixed four leaving a hole on the right. Written out rather than
+ * interpolated because Tailwind reads these class names from the source.
+ */
+const STAT_COLUMNS: Record<number, string> = {
+  1: "grid-cols-1",
+  2: "grid-cols-2",
+  3: "grid-cols-2 sm:grid-cols-3",
+  4: "grid-cols-2 lg:grid-cols-4",
+};
+
+/**
+ * Where one student stands, as the database decided it.
+ *
+ * `loadClassBands` already answers `stable` for a member it has nothing to
+ * compare — that is the view's own answer for an uneventful history, not this
+ * page's guess — and the same word is used for a member missing from the map
+ * entirely, so the two cannot be told apart by looking.
+ */
+function statusOf(
+  standing: Map<string, MemberBands>,
+  entry: RosterEntry,
+): MemberStatus {
+  return standing.get(entry.membershipId)?.status ?? "stable";
+}
+
+/**
+ * One fact about the class: its own label, and the shorter form the header uses.
+ *
+ * `summary` is what runs under the title, where the Figma writes "Target: IELTS
+ * 6.5" rather than a labelled row; `term` and `value` are what the Class Info
+ * tab lays out as a label above a value. Both readings come from one list so
+ * the two can never drift apart.
+ */
+type Fact = { term: string; value: string; summary?: string };
+
+/**
+ * The facts worth showing, skipping every column this class left blank.
+ *
+ * Blank stays blank rather than becoming "Not set": a class with no schedule
+ * note has nothing to say about its schedule, and a row saying so is a row of
+ * nothing. The Figma's Class Info grid has fixed rows because its data is a
+ * fixture and every field is filled.
+ *
+ * The Figma also lists an "Invite code" here. EduTrack has one, and it is shown
+ * below this grid as the whole joinable link rather than as a bare code,
+ * because the link is the thing a teacher sends.
+ */
+function factsFor(detail: TeacherClassDetail): Fact[] {
+  const facts: Fact[] = [];
+
+  const course = isOfferedCourseType(detail.courseType)
+    ? LABELS[detail.courseType]
+    : detail.courseTypeOther;
+
+  if (course) {
+    facts.push({ term: "Course", value: course, summary: course });
+  }
+
+  if (detail.targetBand !== null) {
+    const band = `IELTS ${detail.targetBand.toFixed(1)}`;
+    facts.push({ term: "Target", value: band, summary: `Target: ${band}` });
+  }
+
+  if (detail.scheduleNote) {
+    facts.push({
+      term: "Schedule",
+      value: detail.scheduleNote,
+      summary: detail.scheduleNote,
+    });
+  }
+
+  // Split in the grid, joined in the header — the Figma writes "Start date" and
+  // "End date" as two rows of Class Info and one date range under the title.
+  const start = DATE.format(asDate(detail.startDate));
+  const end = detail.endDate ? DATE.format(asDate(detail.endDate)) : null;
+
+  facts.push({
+    term: "Start date",
+    value: start,
+    summary: end ? `${start} — ${end}` : `From ${start}`,
+  });
+
+  // No `summary`: the header has already said this date, inside the range on
+  // the fact above. Two rows in the grid, one phrase under the title.
+  if (end) {
+    facts.push({ term: "End date", value: end });
+  }
+
+  return facts;
+}
+
+/**
+ * The roster, and whichever student is open beneath it.
+ *
+ * The table is the Figma's, minus two of its eight columns. "Homework" is not a
+ * column because EduTrack has no homework: there is no table, no view and no
+ * number, and a column of dashes would be a promise of a feature. "Attendance"
+ * is not a column because the Figma's is a single percentage, and a percentage
+ * is a derived metric this application has consistently declined to invent —
+ * attendance here is four distinct statuses per lesson, and it is shown as
+ * exactly that in the panel below, where there is room to be honest about it.
+ *
+ * Everything else is the design as drawn: a 32px initials avatar over name and
+ * address, the current band in semibold, the goal muted beside it, four thin
+ * skill bars, and the standing as a tinted pill.
+ */
+function Students({
+  classId,
+  timezone,
+  banded,
+  filter,
+  link,
+  roster,
+  rosterTotal,
+  pending,
+  standing,
+  selected,
+  overview,
+}: {
+  classId: string;
+  timezone: string;
+  banded: boolean;
+  filter: Filter;
+  link: string | null;
+  roster: RosterEntry[];
+  rosterTotal: number;
+  pending: RosterEntry[];
+  standing: Map<string, MemberBands> | null;
+  selected: RosterEntry | null;
+  overview: StudentOverview | null;
+}) {
+  return (
+    <>
+      <Table label="Students" containerClassName="mb-6">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Student</TableHead>
+            {standing !== null ? (
+              <>
+                <TableHead>Current band</TableHead>
+                <TableHead>Target</TableHead>
+                <TableHead>Skills</TableHead>
+                <TableHead>Status</TableHead>
+              </>
+            ) : null}
+            <TableHead>
+              <span className="sr-only">Open</span>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+
+        <TableBody>
+          {/* Three different silences, kept apart. Nobody has joined at all;
+              the filter matched nobody; or the roster is fine and not empty.
+              None of them is an error — a class that could not be read never
+              reaches this component. */}
+          {roster.length === 0 ? (
+            <TableRow>
+              <TableCell
+                colSpan={standing === null ? 2 : 6}
+                className="p-12 text-center text-muted-foreground"
+              >
+                {rosterTotal === 0
+                  ? "Nobody has joined yet. Share the invitation link from Class Info."
+                  : "No students in this category."}
+              </TableCell>
+            </TableRow>
+          ) : null}
+
+          {roster.map((entry) => {
+            const bands = standing?.get(entry.membershipId) ?? null;
+
+            return (
+              <TableRow
+                key={entry.membershipId}
+                id={anchorFor(entry)}
+                // The open row, marked so the panel below can be traced back to
+                // the person it belongs to.
+                className={
+                  entry.membershipId === selected?.membershipId
+                    ? "bg-background"
+                    : undefined
+                }
+              >
+                <TableCell>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Avatar name={nameOf(entry)} />
+                    <div className="min-w-0">
+                      <p className="font-medium break-words">{nameOf(entry)}</p>
+                      {entry.name && entry.email ? (
+                        <p className="text-xs break-words text-muted-foreground">
+                          {entry.email}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </TableCell>
+
+                {standing !== null ? (
+                  <>
+                    <TableCell className="font-semibold whitespace-nowrap">
+                      {formatBand(bands?.currentOverall ?? null) ?? (
+                        <span className="font-normal text-muted-foreground">
+                          Not recorded
+                        </span>
+                      )}
+                    </TableCell>
+
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {formatBand(entry.targetBand) ?? "Not set"}
+                    </TableCell>
+
+                    <TableCell>
+                      <Skills bands={bands} />
+                    </TableCell>
+
+                    <TableCell>
+                      <Badge tone={STATUS_TONES[bands?.status ?? "stable"]}>
+                        {MEMBER_STATUS_LABELS[bands?.status ?? "stable"]}
+                      </Badge>
+                    </TableCell>
+                  </>
                 ) : null}
 
-                {banded ? (
-                  <TargetBand entry={entry} classId={detail.classId} />
-                ) : null}
+                <TableCell className="whitespace-nowrap">
+                  {/* The Figma makes the whole row a click target with an
+                      `onClick`. A row cannot be a link, and a scripted row
+                      would be a row that stops working with JavaScript off, so
+                      the affordance is this — a real link, in the tab order,
+                      named after the student it opens. */}
+                  <Link
+                    href={hrefFor(
+                      classId,
+                      { filter, student: entry.membershipId },
+                      PANEL_ANCHOR,
+                    )}
+                    className="rounded-sm text-xs font-medium text-primary outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  >
+                    View<span className="sr-only"> {nameOf(entry)}</span>{" "}
+                    <span aria-hidden>→</span>
+                  </Link>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
 
-                <Standing entry={entry} classId={detail.classId} />
-
-                <Overview
-                  entry={entry}
-                  classId={detail.classId}
-                  banded={banded}
-                  timezone={detail.timezone}
-                  overview={
-                    overview?.kind === "ok" &&
-                    overview.overview.membershipId === entry.membershipId
-                      ? overview.overview
-                      : null
-                  }
-                />
-
-                <Confirm
-                  label="Remove student"
-                  prompt={`${nameOf(entry)} will be taken off this class list. Their account and any other classes they are in are not affected.`}
-                  confirmLabel="Remove student"
-                  pendingLabel="Removing…"
-                  action={removeStudent.bind(
-                    null,
-                    detail.classId,
-                    entry.membershipId,
-                  )}
-                />
-              </Card>
-            </li>
-          ))}
-        </ul>
-      )}
+      {selected ? (
+        <StudentPanel
+          entry={selected}
+          overview={overview}
+          classId={classId}
+          banded={banded}
+          filter={filter}
+          timezone={timezone}
+        />
+      ) : null}
 
       {pending.length > 0 ? (
         <>
@@ -400,56 +743,439 @@ export default async function TeacherClassPage({
             Pending invitations ({pending.length})
           </h2>
 
-          <ul className="space-y-3">
-            {pending.map((entry) => (
-              <li key={entry.membershipId}>
-                <Card>
-                  <Person entry={entry} />
-                  {/* `invite_email_sent_at` is stamped only after the SMTP
-                      send resolves, so this never claims a delivery that did
-                      not happen. */}
-                  <p className="mt-2 text-xs text-muted-foreground">
+          <Table label="Pending invitations">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Student</TableHead>
+                <TableHead>Invitation</TableHead>
+                <TableHead>
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+
+            <TableBody>
+              {pending.map((entry) => (
+                <TableRow key={entry.membershipId}>
+                  <TableCell>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <Avatar name={nameOf(entry)} />
+                      <div className="min-w-0">
+                        <p className="font-medium break-words">
+                          {nameOf(entry)}
+                        </p>
+                        {entry.name && entry.email ? (
+                          <p className="text-xs break-words text-muted-foreground">
+                            {entry.email}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </TableCell>
+
+                  {/* `invite_email_sent_at` is stamped only after the SMTP send
+                      resolves, so this never claims a delivery that did not
+                      happen. */}
+                  <TableCell className="text-muted-foreground">
                     {entry.inviteEmailSentAt
-                      ? `Invitation sent ${DATE.format(new Date(entry.inviteEmailSentAt))}`
+                      ? `Sent ${DATE.format(new Date(entry.inviteEmailSentAt))}`
                       : "Added, but the invitation email has not gone out — share the link with them."}
-                  </p>
+                  </TableCell>
 
-                  {/* Only offered when there is something to send and somewhere
-                      to send it: the message carries the invitation link, and a
-                      row invited by link alone has no address on it. */}
-                  {link && entry.email ? (
-                    <form
-                      action={resendInvitation.bind(
-                        null,
-                        detail.classId,
-                        entry.membershipId,
-                      )}
-                      className="mt-3"
-                    >
-                      <Button type="submit" variant="outline" size="sm">
-                        Resend invitation
-                      </Button>
-                    </form>
-                  ) : null}
+                  <TableCell>
+                    <div className="min-w-40">
+                      {/* Only offered when there is something to send and
+                          somewhere to send it: the message carries the
+                          invitation link, and a row invited by link alone has
+                          no address on it. */}
+                      {link && entry.email ? (
+                        <form
+                          action={resendInvitation.bind(
+                            null,
+                            classId,
+                            entry.membershipId,
+                          )}
+                        >
+                          <Button type="submit" variant="outline" size="sm">
+                            Resend invitation
+                          </Button>
+                        </form>
+                      ) : null}
 
-                  <Confirm
-                    label="Cancel invitation"
-                    prompt={`${nameOf(entry)} will be taken off this class list. You can invite them again afterwards.`}
-                    confirmLabel="Cancel invitation"
-                    pendingLabel="Cancelling…"
-                    action={cancelInvitation.bind(
-                      null,
-                      detail.classId,
-                      entry.membershipId,
-                    )}
-                  />
-                </Card>
-              </li>
-            ))}
-          </ul>
+                      <Confirm
+                        label="Cancel invitation"
+                        prompt={`${nameOf(entry)} will be taken off this class list. You can invite them again afterwards.`}
+                        confirmLabel="Cancel invitation"
+                        pendingLabel="Cancelling…"
+                        action={cancelInvitation.bind(
+                          null,
+                          classId,
+                          entry.membershipId,
+                        )}
+                      />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </>
       ) : null}
-    </Frame>
+    </>
+  );
+}
+
+/**
+ * One student's four skill bands, drawn.
+ *
+ * Every number is `v_member_current_band`'s. Nothing is averaged, compared or
+ * derived — the bar receives a band and a maximum of 9, which is the scale the
+ * band domain itself runs on, and draws it.
+ *
+ * A skill with no band is left out rather than drawn as an empty track, the
+ * same rule the score history already follows: `null` means "not measured", and
+ * an empty bar beside three full ones reads as a zero.
+ *
+ * All four bars are one colour. The Figma turns a bar green above 6.5, which is
+ * a judgement about whether a band is good — EduTrack keeps judgements like
+ * that in the database, where a target band is per student and per class rather
+ * than a number written into a stylesheet.
+ */
+function Skills({ bands }: { bands: MemberBands | null }) {
+  const rows = BAND_SKILLS.map((skill) => {
+    const capitalised = (skill.charAt(0).toUpperCase() +
+      skill.slice(1)) as "Reading" | "Listening" | "Writing" | "Speaking";
+    const band = bands?.[`current${capitalised}`] ?? null;
+    return { skill, band };
+  }).filter((row) => row.band !== null);
+
+  if (rows.length === 0) {
+    return <span className="text-muted-foreground">Not recorded</span>;
+  }
+
+  return (
+    <div className="w-28 space-y-1">
+      {rows.map(({ skill, band }) => (
+        <div key={skill} className="flex items-center gap-1.5">
+          <span
+            aria-hidden
+            className="w-4 shrink-0 text-[10px] text-muted-foreground"
+          >
+            {BAND_FIELD_LABELS[skill].charAt(0)}
+          </span>
+
+          {/* The number is written beside the bar, so the bar itself is
+              decoration and is hidden rather than announced twice. */}
+          <ProgressBar value={band as number} max={9} />
+
+          <span className="w-6 shrink-0 text-right text-[10px] text-muted-foreground">
+            <span className="sr-only">{BAND_FIELD_LABELS[skill]} </span>
+            {formatBand(band)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The class's own facts, and the way to invite people to it.
+ *
+ * The Figma's two-column grid, with the fields EduTrack actually stores. Its
+ * "Invite code" row is the invitation block underneath: a code on its own is
+ * not something a teacher can send, and the link and the email form are the two
+ * ways this application has ever offered to hand one out. Both are unchanged —
+ * the same `CopyField`, the same `inviteStudentByEmail` bound to the same class.
+ */
+function ClassInfo({
+  classId,
+  facts,
+  link,
+}: {
+  classId: string;
+  facts: Fact[];
+  link: string | null;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-card p-6">
+      <dl className="grid gap-4 sm:grid-cols-2">
+        {facts.map((fact) => (
+          <div key={fact.term} className="min-w-0">
+            <dt className="mb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              {fact.term}
+            </dt>
+            <dd className="text-sm font-medium break-words text-foreground">
+              {fact.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+
+      <div id="invite" className="mt-6 border-t border-border pt-6">
+        <h2 className="mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Invite students
+        </h2>
+
+        {link ? (
+          <>
+            <CopyField label="Class invitation link" value={link} />
+            <p className="-mt-1 mb-6 text-sm text-muted-foreground">
+              Anyone with this link can join this class.
+            </p>
+
+            {/* The same action the wizard's last step uses, bound to the class
+                in the URL rather than to whichever class happens to be newest.
+                That binding is not what authorises the write — the action
+                re-reads the class filtered by the authenticated teacher's id
+                before it does anything. Without this form, a teacher with more
+                than one class would have no way to invite by email at all,
+                because the step that used to offer it now sends them here. */}
+            <form
+              action={inviteStudentByEmail.bind(null, classId, "class")}
+              className="space-y-1.5"
+            >
+              <Label htmlFor="email">Or invite by email</Label>
+              <div className="flex flex-wrap items-start gap-2">
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  autoComplete="off"
+                  placeholder="student@email.com"
+                  className="min-w-0 grow basis-48"
+                  required
+                />
+                <SubmitButton pendingLabel="Sending…">Send</SubmitButton>
+              </div>
+            </form>
+          </>
+        ) : (
+          // No email form either: the invitation email carries the link, so
+          // with no usable code there is nothing to send.
+          <p className="text-sm text-muted-foreground">
+            This class has no active invitation link right now. Refresh the page
+            in a moment to check again.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The lessons this class has held, and the way to add one.
+ *
+ * The Figma's class detail has no lessons on it — its prototype keeps lesson
+ * logs on a page of their own — so this is the design's table vocabulary
+ * applied to a section the design does not draw, rather than a screen copied.
+ * It is a third tab because the alternative was deleting a working feature to
+ * match a mock-up, and because a list of lessons is not a class fact and does
+ * not belong in Class Info.
+ */
+function Lessons({
+  classId,
+  timezone,
+  sessions,
+}: {
+  classId: string;
+  timezone: string;
+  sessions: ClassSession[] | null;
+}) {
+  return (
+    <>
+      {sessions === null ? (
+        <Alert>
+          We couldn&apos;t load this class&apos;s lessons just now. Please
+          refresh the page.
+        </Alert>
+      ) : sessions.length === 0 ? (
+        <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
+          No lessons have been recorded yet.
+        </div>
+      ) : (
+        <Table label="Lessons">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Date</TableHead>
+              <TableHead>Time</TableHead>
+              <TableHead>Lesson</TableHead>
+              <TableHead>
+                <span className="sr-only">Open</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+
+          <TableBody>
+            {sessions.map((session, index) => (
+              <TableRow key={session.sessionId}>
+                {/* Both instants are read on the class's own clock. Formatting
+                    them without naming a zone would show a Vietnamese evening
+                    class as having met the previous afternoon on a server
+                    running in UTC. */}
+                <TableCell className="font-medium whitespace-nowrap">
+                  {formatZonedDate(timezone, session.startsAt)}
+                </TableCell>
+
+                <TableCell className="whitespace-nowrap text-muted-foreground">
+                  {formatZonedTime(timezone, session.startsAt)} –{" "}
+                  {formatZonedTime(timezone, session.endsAt)}
+                </TableCell>
+
+                <TableCell>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    {/* `ordinal` is the row's position in the chronological
+                        list, not a stored lesson number — `class_sessions` has
+                        no such column. It only gives an untitled lesson
+                        something to be called, and so renumbers if a lesson is
+                        later inserted between two others. */}
+                    <span className="break-words">
+                      {session.title ?? `Lesson ${index + 1}`}
+                    </span>
+
+                    {/* Everything this page creates is `scheduled`, the
+                        column's default, so saying so on every row would be
+                        noise. The other two states can only arrive from
+                        elsewhere, and hiding them would misreport the class. */}
+                    {session.status === "cancelled" ? (
+                      <Badge tone="destructive">Cancelled</Badge>
+                    ) : session.status === "completed" ? (
+                      <Badge tone="green">Completed</Badge>
+                    ) : null}
+                  </div>
+                </TableCell>
+
+                <TableCell className="whitespace-nowrap">
+                  {/* The link carries both segments, and the page behind it
+                      proves both — the session id alone does not select the
+                      lesson. */}
+                  <Link
+                    href={`/teacher/${classId}/sessions/${session.sessionId}`}
+                    className="rounded-sm text-xs font-medium text-primary outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  >
+                    Open
+                    <span className="sr-only">
+                      {" "}
+                      {session.title ?? `lesson ${index + 1}`}
+                    </span>{" "}
+                    <span aria-hidden>→</span>
+                  </Link>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      {/* Offered in all three states, including the failed one: whether the
+          list could be read has no bearing on whether a lesson can be added. */}
+      <div className="mt-4">
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/teacher/${classId}/sessions/new`}>Create lesson</Link>
+        </Button>
+      </div>
+    </>
+  );
+}
+
+/**
+ * One student, opened: everything recorded about them, and every control that
+ * writes it.
+ *
+ * This is the card the roster used to be, for one student at a time. Before
+ * this milestone every student's target-band picker and tag editors were
+ * rendered at once, one stack of forms per person; the Figma's table has no
+ * room for that and does not need it, so the controls follow the selection.
+ * Nothing was removed — the goal, the strengths, the focus areas and the
+ * removal are all still here, still the same Server Actions, still posting
+ * without JavaScript.
+ *
+ * `overview` may be null while `entry` is not: the roster row proved the
+ * student is on this class list, and the overview query is a separate read that
+ * can fail on its own. When it does, the controls still work and the banner at
+ * the top of the page says the history could not be read — which is not the
+ * same claim as "this student has no history".
+ */
+function StudentPanel({
+  entry,
+  overview,
+  classId,
+  banded,
+  filter,
+  timezone,
+}: {
+  entry: RosterEntry;
+  overview: StudentOverview | null;
+  classId: string;
+  banded: boolean;
+  filter: Filter;
+  timezone: string;
+}) {
+  return (
+    <section
+      id={PANEL_ANCHOR}
+      aria-label={`${nameOf(entry)} — overview`}
+      className="mb-6 min-w-0 rounded-xl border border-border bg-card p-6"
+    >
+      {/* One list for every tag input below. A datalist is a suggestion and not
+          a constraint — both columns are free text, and a teacher typing "Task 2
+          structure" is the case these fields exist for. */}
+      <datalist id={SUGGESTION_LIST}>
+        {TAG_SUGGESTIONS.map((suggestion) => (
+          <option key={suggestion} value={suggestion} />
+        ))}
+      </datalist>
+
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 grow basis-64 items-center gap-3">
+          <Avatar name={nameOf(entry)} size="lg" />
+          <div className="min-w-0">
+            <h2 className="font-semibold break-words text-foreground">
+              {nameOf(entry)}
+            </h2>
+            {entry.name && entry.email ? (
+              <p className="text-sm break-words text-muted-foreground">
+                {entry.email}
+              </p>
+            ) : null}
+            {entry.joinedAt ? (
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Joined {DATE.format(new Date(entry.joinedAt))}
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        <Button asChild variant="outline" size="sm">
+          <Link href={hrefFor(classId, { filter }, anchorFor(entry))}>
+            Close
+          </Link>
+        </Button>
+      </div>
+
+      <div className="mt-6 space-y-6">
+        {banded ? <TargetBand entry={entry} classId={classId} /> : null}
+
+        <Standing entry={entry} classId={classId} />
+
+        {overview ? (
+          <Overview
+            overview={overview}
+            banded={banded}
+            timezone={timezone}
+          />
+        ) : null}
+      </div>
+
+      <div className="mt-6 border-t border-border pt-4">
+        <Confirm
+          label="Remove student"
+          prompt={`${nameOf(entry)} will be taken off this class list. Their account and any other classes they are in are not affected.`}
+          confirmLabel="Remove student"
+          pendingLabel="Removing…"
+          action={removeStudent.bind(null, classId, entry.membershipId)}
+        />
+      </div>
+    </section>
   );
 }
 
@@ -488,10 +1214,7 @@ function TargetBand({
   const field = `target-${entry.membershipId}`;
 
   return (
-    <form
-      action={setTargetBand.bind(null, classId, entry.membershipId)}
-      className="mt-3 border-t border-border pt-3"
-    >
+    <form action={setTargetBand.bind(null, classId, entry.membershipId)}>
       <label
         htmlFor={field}
         className="text-xs font-medium tracking-wide text-muted-foreground uppercase"
@@ -502,7 +1225,7 @@ function TargetBand({
       <p className="mt-1 text-sm text-foreground">{saved ?? "Not set"}</p>
 
       {/* `flex-wrap` so the picker and the button stack rather than overflow
-          once the card is 390px wide. */}
+          once the panel is 390px wide. */}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <select
           id={field}
@@ -524,9 +1247,6 @@ function TargetBand({
   );
 }
 
-/** The id every tag input points at; the list itself is rendered once. */
-const SUGGESTION_LIST = "tag-suggestions";
-
 /**
  * What this student does well, and what they are working on.
  *
@@ -543,13 +1263,13 @@ const SUGGESTION_LIST = "tag-suggestions";
  * the attempted ones — the same honesty the target-band line has, where what is
  * drawn is always what the database holds.
  *
- * `\u0000` joins the key because it cannot occur in a tag; a comma could.
+ * U+0000 joins the key because it cannot occur in a tag; a comma could.
  */
 function Standing({ entry, classId }: { entry: RosterEntry; classId: string }) {
   return (
     <form
       action={saveStandingNotes.bind(null, classId, entry.membershipId)}
-      className="mt-3 min-w-0 border-t border-border pt-3"
+      className="min-w-0 border-t border-border pt-5"
     >
       <TagEditor
         key={`s:${entry.strengths.join("\u0000")}`}
@@ -581,120 +1301,26 @@ function Standing({ entry, classId }: { entry: RosterEntry; classId: string }) {
 }
 
 /**
- * One lesson: when it is, and what it is called.
- *
- * Date and time first, title after, because a lesson is identified by when it
- * happened — the title is the optional part, and most rows will not have one.
- *
- * Both are read on the class's own clock. `starts_at` is an instant, so
- * formatting it without naming a zone would show a Vietnamese evening class as
- * having met the previous afternoon on a server running in UTC.
- *
- * `ordinal` is the row's position in the chronological list, not a stored lesson
- * number — `class_sessions` has no such column, and the only order it defines is
- * `starts_at`. It is used solely to give an untitled lesson something to be
- * called, and it therefore renumbers if a lesson is later inserted between two
- * others, which is the honest behaviour for a derived position.
- */
-function Lesson({
-  session,
-  classId,
-  timezone,
-  ordinal,
-}: {
-  session: ClassSession;
-  classId: string;
-  timezone: string;
-  ordinal: number;
-}) {
-  return (
-    <>
-      <h3 className="font-semibold text-foreground">
-        {formatZonedDate(timezone, session.startsAt)}
-      </h3>
-
-      <p className="mt-1 text-sm text-muted-foreground">
-        {formatZonedTime(timezone, session.startsAt)} –{" "}
-        {formatZonedTime(timezone, session.endsAt)}
-      </p>
-
-      <p className="mt-2 text-sm text-foreground">
-        {session.title ?? `Lesson ${ordinal}`}
-      </p>
-
-      {/* Everything this page creates is `scheduled`, the column's default, so
-          saying so on every row would be noise. The other two states can only
-          arrive from elsewhere, and hiding them would misreport the class. */}
-      {session.status === "scheduled" ? null : (
-        <p className="mt-2 text-xs text-muted-foreground">
-          {session.status === "cancelled" ? "Cancelled" : "Completed"}
-        </p>
-      )}
-
-      {/* The same pairing the class list uses for "Open class": one card, one
-          way in. The link carries both segments, and the page behind it proves
-          both — the session id alone does not select the lesson. */}
-      <Button asChild variant="outline" size="sm" className="mt-4">
-        <Link href={`/teacher/${classId}/sessions/${session.sessionId}`}>
-          Open lesson
-        </Link>
-      </Button>
-    </>
-  );
-}
-
-/** Where a card sits in the page, so a link can return to it. */
-function anchorFor(entry: RosterEntry): string {
-  return `student-${entry.membershipId}`;
-}
-
-/**
- * One student's existing facts, gathered — and the control that opens them.
+ * One student's existing facts, gathered.
  *
  * A view and only a view. There is no form here and no Server Action: every one
  * of these values already has a dedicated control elsewhere on this page or on
  * the lesson pages, and a second way to write them would be a second thing to
- * keep correct. Opening the panel is a `<Link>`, closing it is a `<Link>`, and
- * both work with JavaScript off.
- *
- * The panel is this card expanded rather than a page of its own. Everything it
- * needs — the teacher's identity, the class's ownership, the roster — has
- * already been established by the time the card renders, and a separate route
- * would have to establish all of it again.
+ * keep correct.
  *
  * `banded` gates the two band sections for the same reason `TargetBand` is
  * gated: a class that scores on nothing has no bands to show, and the actions
  * that record them refuse the write for that class anyway.
  */
 function Overview({
-  entry,
-  classId,
+  overview,
   banded,
   timezone,
-  overview,
 }: {
-  entry: RosterEntry;
-  classId: string;
+  overview: StudentOverview;
   banded: boolean;
   timezone: string;
-  overview: StudentOverview | null;
 }) {
-  const anchor = anchorFor(entry);
-
-  if (!overview) {
-    return (
-      <div className="mt-3">
-        <Button asChild variant="outline" size="sm">
-          <Link
-            href={`/teacher/${classId}?student=${entry.membershipId}#${anchor}`}
-          >
-            View overview
-          </Link>
-        </Button>
-      </div>
-    );
-  }
-
   const { bands } = overview;
 
   // Nothing to say rather than three empty rows: a student nobody has assessed
@@ -706,126 +1332,94 @@ function Overview({
     bands.currentOverall === null;
 
   return (
-    <div className="mt-3 min-w-0 border-t border-border pt-3">
-      {/* Named again inside the panel: the card's heading is above it, but the
-          overview is the thing being read and it should say whose it is. */}
-      <h4 className="font-semibold break-words text-foreground">
-        {overview.name ?? overview.email ?? "This student"}
-      </h4>
-      {overview.name && overview.email ? (
-        <p className="mb-4 text-sm break-words text-muted-foreground">
-          {overview.email}
-        </p>
-      ) : (
-        <div className="mb-4" />
-      )}
-
-      <div className="space-y-5">
-        {banded ? (
-          <Section title="Progress">
-            {unassessed ? (
-              <Empty>No bands have been recorded yet.</Empty>
-            ) : (
-              <dl className="space-y-2">
-                {/* Every value here is the database's own. `target_band`,
-                    `start_overall` and `current_overall` come off
-                    `v_member_current_band` and the status off
-                    `v_member_performance_status`; nothing is compared or
-                    averaged on this page. */}
-                <Fact term="Target" value={formatBand(bands.targetBand) ?? "Not set"} />
-                <Fact
-                  term="Starting"
-                  value={formatBand(bands.startOverall) ?? "Not recorded"}
-                />
-                <Fact
-                  term="Current"
-                  value={formatBand(bands.currentOverall) ?? "Not recorded"}
-                />
-                <Fact term="Status" value={MEMBER_STATUS_LABELS[bands.status]} />
-              </dl>
-            )}
-          </Section>
-        ) : null}
-
-        <Section title="Strengths">
-          <Tags tags={overview.strengths} empty="No strengths recorded yet." />
-        </Section>
-
-        <Section title="Focus areas">
-          <Tags tags={overview.focusAreas} empty="No focus areas recorded yet." />
-        </Section>
-
-        <Section title="Attendance">
-          {overview.attendance.length === 0 ? (
-            <Empty>No attendance recorded yet.</Empty>
+    <div className="min-w-0 space-y-5 border-t border-border pt-5">
+      {banded ? (
+        <Section title="Progress">
+          {unassessed ? (
+            <Empty>No bands have been recorded yet.</Empty>
           ) : (
-            <ul className="space-y-2.5">
-              {overview.attendance.map((mark) => (
-                <li key={mark.sessionId} className="min-w-0">
-                  <p className="text-sm text-foreground">
-                    {ATTENDANCE_LABELS[mark.status]}
-                  </p>
-                  {/* The class's own clock, through `lib/time.ts`, exactly as
-                      the lesson list above reads the same two instants. */}
-                  <p className="text-xs break-words text-muted-foreground">
-                    {formatZonedDate(timezone, mark.startsAt)} ·{" "}
-                    {formatZonedTime(timezone, mark.startsAt)} –{" "}
-                    {formatZonedTime(timezone, mark.endsAt)}
-                    {mark.sessionTitle ? ` · ${mark.sessionTitle}` : ""}
-                  </p>
-                </li>
-              ))}
-            </ul>
+            <dl className="space-y-2">
+              {/* Every value here is the database's own. `target_band`,
+                  `start_overall` and `current_overall` come off
+                  `v_member_current_band` and the status off
+                  `v_member_performance_status`; nothing is compared or averaged
+                  on this page. */}
+              <Fact
+                term="Target"
+                value={formatBand(bands.targetBand) ?? "Not set"}
+              />
+              <Fact
+                term="Starting"
+                value={formatBand(bands.startOverall) ?? "Not recorded"}
+              />
+              <Fact
+                term="Current"
+                value={formatBand(bands.currentOverall) ?? "Not recorded"}
+              />
+              <Fact
+                term="Status"
+                value={MEMBER_STATUS_LABELS[bands.status]}
+              />
+            </dl>
           )}
         </Section>
+      ) : null}
 
-        {banded ? (
-          <Section title="Score history">
-            {overview.scores.length === 0 ? (
-              <Empty>No score entries yet.</Empty>
-            ) : (
-              <ul className="space-y-2.5">
-                {overview.scores.map((score) => (
-                  <li key={score.entryId} className="min-w-0">
-                    {/* `recorded_on` is a bare `date` — a calendar square, read
-                        as one. No instant, and so no zone conversion. */}
-                    <p className="text-sm text-foreground">
-                      {DATE.format(asDate(score.recordedOn))} ·{" "}
-                      {SCORE_ENTRY_TYPE_LABELS[score.entryType]}
-                    </p>
-                    <p className="text-xs break-words text-muted-foreground">
-                      {bandsOf(score)}
-                    </p>
-                    {score.note ? (
-                      <p className="mt-1 text-sm break-words text-foreground">
-                        {score.note}
-                      </p>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
-        ) : null}
+      {/* Strengths and focus areas are not repeated here. They were their own
+          two sections while the overview was a panel of its own; now that the
+          editor above sits in the same card and prints the same two saved
+          lists, showing them twice would be one column rendered twice on one
+          screen. Nothing is lost — `Standing` reads the same values. */}
 
-        <Section title="Lesson notes">
-          {overview.notes.length === 0 ? (
-            <Empty>No lesson notes yet.</Empty>
+      <Section title="Attendance">
+        {overview.attendance.length === 0 ? (
+          <Empty>No attendance recorded yet.</Empty>
+        ) : (
+          <ul className="space-y-2.5">
+            {overview.attendance.map((mark) => (
+              <li key={mark.sessionId} className="min-w-0">
+                {/* All four statuses, each with its own word and its own tint.
+                    The Figma's teacher table reduces attendance to one
+                    percentage; EduTrack records four distinct states per
+                    lesson, and `excused` in particular is the one that takes a
+                    lesson out of the reckoning altogether. */}
+                <Badge tone={ATTENDANCE_TONES[mark.status]}>
+                  {ATTENDANCE_LABELS[mark.status]}
+                </Badge>
+                {/* The class's own clock, through `lib/time.ts`, exactly as the
+                    lesson list reads the same two instants. */}
+                <p className="mt-1 text-xs break-words text-muted-foreground">
+                  {formatZonedDate(timezone, mark.startsAt)} ·{" "}
+                  {formatZonedTime(timezone, mark.startsAt)} –{" "}
+                  {formatZonedTime(timezone, mark.endsAt)}
+                  {mark.sessionTitle ? ` · ${mark.sessionTitle}` : ""}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
+      {banded ? (
+        <Section title="Score history">
+          {overview.scores.length === 0 ? (
+            <Empty>No score entries yet.</Empty>
           ) : (
             <ul className="space-y-2.5">
-              {overview.notes.map((note) => (
-                <li key={note.noteId} className="min-w-0">
-                  <p className="text-sm break-words text-foreground">
-                    {note.topic}
+              {overview.scores.map((score) => (
+                <li key={score.entryId} className="min-w-0">
+                  {/* `recorded_on` is a bare `date` — a calendar square, read
+                      as one. No instant, and so no zone conversion. */}
+                  <p className="text-sm text-foreground">
+                    {DATE.format(asDate(score.recordedOn))} ·{" "}
+                    {SCORE_ENTRY_TYPE_LABELS[score.entryType]}
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    {DATE.format(asDate(note.lessonDate))} ·{" "}
-                    {SKILL_LABELS[note.skill]} ·{" "}
-                    {PERFORMANCE_LABELS[note.performance]}
+                  <p className="text-xs break-words text-muted-foreground">
+                    {bandsOf(score)}
                   </p>
-                  {note.note ? (
+                  {score.note ? (
                     <p className="mt-1 text-sm break-words text-foreground">
-                      {note.note}
+                      {score.note}
                     </p>
                   ) : null}
                 </li>
@@ -833,13 +1427,33 @@ function Overview({
             </ul>
           )}
         </Section>
-      </div>
+      ) : null}
 
-      <div className="mt-5">
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/teacher/${classId}#${anchor}`}>Close overview</Link>
-        </Button>
-      </div>
+      <Section title="Lesson notes">
+        {overview.notes.length === 0 ? (
+          <Empty>No lesson notes yet.</Empty>
+        ) : (
+          <ul className="space-y-2.5">
+            {overview.notes.map((note) => (
+              <li key={note.noteId} className="min-w-0">
+                <p className="text-sm break-words text-foreground">
+                  {note.topic}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {DATE.format(asDate(note.lessonDate))} ·{" "}
+                  {SKILL_LABELS[note.skill]} ·{" "}
+                  {PERFORMANCE_LABELS[note.performance]}
+                </p>
+                {note.note ? (
+                  <p className="mt-1 text-sm break-words text-foreground">
+                    {note.note}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
     </div>
   );
 }
@@ -877,7 +1491,7 @@ function Empty({ children }: { children: ReactNode }) {
   return <p className="text-sm text-muted-foreground">{children}</p>;
 }
 
-/** One term and its value, in the same shape as the class facts above. */
+/** One term and its value, in the same shape as the class facts. */
 function Fact({ term, value }: { term: string; value: string }) {
   return (
     <div className="flex gap-4 text-sm">
@@ -888,43 +1502,14 @@ function Fact({ term, value }: { term: string; value: string }) {
 }
 
 /**
- * A read-only list of tags, or the sentence that says there are none.
- *
- * The same chips `TagEditor` renders, without the remove control — the editor
- * three lines up this card is where these are changed, and offering a second
- * way to change them here would be two controls writing one column.
- */
-function Tags({ tags, empty }: { tags: string[]; empty: string }) {
-  if (tags.length === 0) return <Empty>{empty}</Empty>;
-
-  return (
-    <ul className="flex flex-wrap gap-1.5">
-      {tags.map((tag) => (
-        <li
-          key={tag}
-          className="min-w-0 rounded-full border border-input bg-background px-2.5 py-1 text-xs break-words text-foreground"
-        >
-          {tag}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** Whoever the card is about, however much of them the row knows. */
-function nameOf(entry: RosterEntry): string {
-  return entry.name ?? entry.email ?? "This student";
-}
-
-/**
  * A destructive action behind an explicit confirmation.
  *
  * `<details>` rather than a dialog or a `confirm()` call, because every other
- * form on this milestone posts without JavaScript and this one does too: the
- * disclosure is the browser’s own, the submit button only exists once it is
+ * form on this page posts without JavaScript and this one does too: the
+ * disclosure is the browser's own, the submit button only exists once it is
  * open, and the summary turns into the way back out. Nothing here is a client
- * component except the submit button, which is the same purely additive
- * pending state the invite form uses.
+ * component except the submit button, which is the same purely additive pending
+ * state the invite form uses.
  *
  * The button is the outline treatment in the destructive pair rather than a new
  * variant — the Figma has no destructive button, and the tinted-surface-plus-
@@ -944,7 +1529,7 @@ function Confirm({
   action: () => Promise<void>;
 }) {
   return (
-    <details className="group mt-3">
+    <details className="group mt-3 min-w-0">
       <summary className="inline-flex cursor-pointer list-none items-center text-sm font-medium text-destructive hover:underline [&::-webkit-details-marker]:hidden">
         <span className="group-open:hidden">{label}</span>
         <span className="hidden group-open:inline">Never mind</span>
@@ -967,48 +1552,17 @@ function Confirm({
 }
 
 /**
- * One person's name and address.
- *
- * A pending invitation usually has an address and no name, so the address is
- * promoted to the heading rather than leaving an empty line above it.
- */
-function Person({ entry }: { entry: RosterEntry }) {
-  if (entry.name) {
-    return (
-      <>
-        <h3 className="mb-1 font-semibold break-words text-foreground">
-          {entry.name}
-        </h3>
-        {entry.email ? (
-          <p className="text-sm break-words text-muted-foreground">
-            {entry.email}
-          </p>
-        ) : null}
-      </>
-    );
-  }
-
-  return (
-    <h3 className="font-semibold break-words text-foreground">
-      {entry.email ?? "Unnamed student"}
-    </h3>
-  );
-}
-
-/**
- * The shell every state shares — including the error state, which keeps the
- * back link so a failed load does not strand anyone on a page with no exit.
+ * The shell the failed load sits in — with the trail kept, so a failed read
+ * does not strand anyone on a page with no exit.
  */
 function Frame({ children }: { children: ReactNode }) {
   return (
-    <main className="flex flex-1 justify-center bg-background p-8">
-      <div className="w-full max-w-lg">
-        <Button asChild variant="ghost" size="inline" className="mb-6 text-sm">
-          <Link href="/teacher">← Back to classes</Link>
-        </Button>
-
-        {children}
-      </div>
-    </main>
+    <PageShell width="5xl">
+      <Breadcrumb
+        className="mb-6"
+        items={[{ label: "Classes", href: "/teacher" }, { label: "Class" }]}
+      />
+      {children}
+    </PageShell>
   );
 }
