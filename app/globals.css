@@ -54,6 +54,7 @@
   --color-placeholder: var(--placeholder);
   --color-decorative: var(--decorative);
   --color-destructive-light: var(--destructive-light);
+  --color-track: var(--track);
   --color-green: var(--green);
   --color-green-light: var(--green-light);
   --color-orange: var(--orange);
@@ -127,6 +128,16 @@
   --destructive: #b42318;
   --destructive-foreground: #ffffff;
   --destructive-light: #fdf3f1;
+
+  /*
+   * The Figma's #F0EFE9: progress-bar tracks, the ground a segmented tab group
+   * sits on, and the hairline between rows inside an already-bordered card. It
+   * is a shade warmer and lighter than `--cream-dark` (#eeede6), which the
+   * Figma keeps for filled surfaces, so the two are not interchangeable.
+   *
+   * Never carries text, so the contrast floor does not apply to it.
+   */
+  --track: #f0efe9;
 
   --green: #3ba876;
   --green-light: #edfaf4;
