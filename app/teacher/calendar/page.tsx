@@ -24,7 +24,6 @@ import {
 } from "@/lib/calendar";
 import { loadUserState } from "@/lib/onboarding";
 import { createClient } from "@/lib/supabase/server";
-import { loadTeacherClassList } from "@/lib/teacher";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
@@ -85,24 +84,13 @@ export default async function TeacherCalendarPage({
   }
 
   const supabase = await createClient();
-  const classes = await loadTeacherClassList(supabase, state.teacher.userId);
 
-  if (classes === null) {
-    return (
-      <PageShell width="5xl" align="start">
-        <PageHeader
-          title="Lịch dạy"
-          breadcrumb={[
-            { label: "Tổng quan", href: "/teacher" },
-            { label: "Lịch dạy" },
-          ]}
-        />
-        <Alert>
-          Chúng tôi chưa tải được lịch dạy của bạn. Vui lòng tải lại trang.
-        </Alert>
-      </PageShell>
-    );
-  }
+  // The class list comes off the context rather than from a query of its own.
+  // `loadUserState` already read it to classify the caller, and re-reading it
+  // here cost this page a whole extra Supabase round trip — the single change
+  // with the largest measured effect in M24. A failed read never reaches this
+  // line: it is reported one layer up as an unplaceable account.
+  const classes = state.teacher.classes;
 
   const zone = calendarZone(classes);
   const today = todayIn(zone);
@@ -252,7 +240,7 @@ export default async function TeacherCalendarPage({
                         <Link
                           href={`/teacher/${lesson.classId}/sessions/${lesson.sessionId}`}
                           className={cn(
-                            "block rounded-lg border-l-[3px] px-2 py-1.5 transition-opacity outline-none hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                            "block rounded-lg border-l-[3px] px-2 py-1.5 transition-opacity outline-none hover:opacity-80 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                             TONE_BLOCK[tones.get(lesson.classId) ?? "primary"],
                             // A cancelled lesson still happened in the
                             // teacher's week and is still worth seeing, so it

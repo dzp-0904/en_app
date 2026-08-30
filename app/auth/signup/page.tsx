@@ -25,7 +25,7 @@ export const metadata: Metadata = {
 };
 
 const TEXT_LINK =
-  "rounded-sm font-medium text-primary underline-offset-2 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+  "rounded-sm font-medium text-primary underline-offset-2 outline-none hover:underline focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
 const POINTS: BrandPoint[] = [
   {

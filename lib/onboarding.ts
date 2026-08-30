@@ -6,6 +6,7 @@ import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { normaliseTeachingType, type OfferedCourseType } from "@/lib/course-type";
 import { loadStudentClasses, type StudentContext } from "@/lib/student";
+import { loadTeacherClassList, type TeacherClassFields } from "@/lib/teacher";
 
 /**
  * Signed-in user classification, plus onboarding access control and progress —
@@ -52,6 +53,18 @@ export type TeacherContext = {
    * `requireFirstClass`.
    */
   hasMultipleClasses: boolean;
+  /**
+   * Every active class the teacher owns, newest first.
+   *
+   * Carried on the context because classifying the caller has to read this
+   * table anyway — the wizard needs to know whether a class exists at all — and
+   * `loadTeacherClassList` then re-issued the identical query one round trip
+   * later on every teacher page. A page that needs the list takes it from here;
+   * `currentClass` and `hasMultipleClasses` are the first entry and the length,
+   * kept as named fields because onboarding reads them and should not have to
+   * know that a list is what they come from.
+   */
+  classes: TeacherClassFields[];
 };
 
 /**
@@ -79,10 +92,32 @@ export type UserState =
 /**
  * Classifies the caller without redirecting.
  *
- * `getUser()` rather than `getClaims()`: this gates writes, so it is worth the
- * round trip to the Auth server to be sure the session has not been revoked and
- * that `role` is read from the row rather than from a token that predates a
- * change to it.
+ * `getUser()` is still called on every request and still decides the answer: it
+ * asks the Auth server directly, so a session revoked server-side is caught
+ * here, and `role` is read from the profile row rather than from a token that
+ * predates a change to it. What changed in M24 is only *when* it runs. It used
+ * to be awaited alone, ahead of everything, and measured **~150 ms** against
+ * this hosted project — twice a PostgREST round trip (~80 ms) and the single
+ * most expensive hop in the application. Sitting at the head of the chain it
+ * delayed reads that did not depend on its answer.
+ *
+ * So the subject id now comes from `getClaims()` first, which verifies the JWT
+ * locally via WebCrypto against a cached JWKS and costs no round trip, and the
+ * three reads are issued together. `getUser()` is one of them, and nothing is
+ * returned until it has answered:
+ *
+ *   - claims absent or unverifiable  -> anonymous, and no query is issued at all
+ *   - claims valid but `getUser()` says no -> anonymous, and every row already
+ *     fetched is discarded unread
+ *
+ * That is the same decision as before, taken on the same evidence, one round
+ * trip earlier. It cannot widen what a caller may see: the reads carry the very
+ * token being checked, so RLS scopes them to that subject's own rows whatever
+ * this function does with `sub`, and a forged id in the `.eq()` would filter to
+ * nothing rather than to somebody else. Supabase's own guidance treats
+ * `getClaims()` as a sound way to establish identity for exactly this reason;
+ * keeping `getUser()` alongside it is what preserves the revocation check the
+ * previous ordering bought.
  *
  * A profile that cannot be read at all reports `not-teacher`. Failing closed is
  * right for an access decision, and the RLS policies would refuse the writes
@@ -100,10 +135,54 @@ export const loadUserState = cache(readUserState);
 async function readUserState(): Promise<UserState> {
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Local: the JWT is verified with WebCrypto against a cached JWKS, and a
+  // token close to expiry is refreshed first. No Auth-server round trip. All
+  // this is used for is the subject id, so the reads below can be issued now
+  // instead of after `getUser()` returns — see this function's own comment.
+  const { data: verified } = await supabase.auth.getClaims();
+  const subject = verified?.claims.sub;
 
+  // No token, or one that does not verify. Nothing is read at all.
+  if (!subject) return { kind: "anonymous" };
+
+  // All three at once. The two reads do not consult `getUser()`'s answer, and
+  // the profile read does not consult the class read, so the only thing
+  // sequencing them ever bought was ~230 ms of waiting per authenticated
+  // request.
+  //
+  // The class read is speculative — it is a teacher's question and the role is
+  // in a reply that has not arrived yet — so a student pays for one extra
+  // statement. It is `where teacher_id = <their own id>`, which is RLS-scoped,
+  // matches nothing, and runs concurrently, so it costs them no wall-clock
+  // time and cannot return anything they may not see.
+  //
+  // It is `loadTeacherClassList` itself rather than the hand-written
+  // `select id, name … limit(2)` this used to be. That probe existed only to
+  // answer "is there a class, and is there more than one", and then
+  // `loadTeacherClassList` issued the identical query — same table, same
+  // `eq`/`is`/`order`, wider projection — one round trip later on every teacher
+  // page. Reading the rows once, here, costs less than reading two of them and
+  // then all of them, and composing the loader rather than restating its query
+  // is what keeps the two projections from drifting apart.
+  const [
+    {
+      data: { user },
+    },
+    { data: profile, error },
+    classes,
+  ] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase
+      .from("profiles")
+      .select("role, full_name, teaching_type, deactivated_at")
+      .eq("id", subject)
+      .maybeSingle(),
+    loadTeacherClassList(supabase, subject),
+  ]);
+
+  // The Auth server has the final say, exactly as before. A session revoked
+  // since the token was minted lands here, and everything read above is
+  // discarded unread.
   if (!user) return { kind: "anonymous" };
 
   const unplaceable: UserState = {
@@ -111,36 +190,6 @@ async function readUserState(): Promise<UserState> {
     userId: user.id,
     email: user.email ?? null,
   };
-
-  // Issued together, not one behind the other. Both are keyed on the `user.id`
-  // `getUser()` just verified and neither reads the other's answer, so the only
-  // thing sequencing them bought was a second ~67 ms round trip on every
-  // authenticated request. The classes probe is speculative — it is a teacher's
-  // question, and the role is in the reply that has not arrived yet — so a
-  // student pays for one extra statement. It is `select id, name from classes
-  // where teacher_id = <their own id>`, which is RLS-scoped, matches nothing,
-  // and runs concurrently, so it costs them no wall-clock time and cannot
-  // return anything they may not see.
-  const [{ data: profile, error }, { data: classes, error: classError }] =
-    await Promise.all([
-      supabase
-        .from("profiles")
-        .select("role, full_name, teaching_type, deactivated_at")
-        .eq("id", user.id)
-        .maybeSingle(),
-      supabase
-        .from("classes")
-        .select("id, name")
-        .eq("teacher_id", user.id)
-        .is("archived_at", null)
-        .order("created_at", { ascending: false })
-        // Two, not one. The first row is `currentClass`; the second exists only
-        // to answer "is there more than one", which is what tells the
-        // onboarding wizard's last step that it is no longer the right page.
-        // Counting them all would read a teacher's whole class list on every
-        // authenticated request to learn a boolean.
-        .limit(2),
-    ]);
 
   if (error) {
     console.error("[onboarding] failed to load profile", {
@@ -177,13 +226,11 @@ async function readUserState(): Promise<UserState> {
   // through into the teacher branch.
   if (profile.role !== "teacher") return unplaceable;
 
-  if (classError) {
-    console.error("[onboarding] failed to load classes", {
-      code: classError.code,
-      message: classError.message,
-    });
-    return unplaceable;
-  }
+  // `loadTeacherClassList` has already logged the reason. A teacher whose class
+  // list could not be read cannot be placed: every teacher page is built on it,
+  // and `[]` here would mean "you have no classes", which is a different and
+  // much worse claim than "we could not tell".
+  if (classes === null) return unplaceable;
 
   return {
     kind: "teacher",
@@ -192,8 +239,11 @@ async function readUserState(): Promise<UserState> {
       email: user.email ?? null,
       fullName: profile.full_name,
       teachingType: normaliseTeachingType(profile.teaching_type),
-      currentClass: classes?.[0] ?? null,
-      hasMultipleClasses: (classes?.length ?? 0) > 1,
+      currentClass: classes[0]
+        ? { id: classes[0].classId, name: classes[0].className }
+        : null,
+      hasMultipleClasses: classes.length > 1,
+      classes,
     },
   };
 }

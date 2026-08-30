@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
  * and does not depend on knowing the colour of whatever sits behind it.
  */
 const buttonVariants = cva(
-  "inline-flex items-center justify-center rounded-lg text-sm transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-60",
+  "inline-flex items-center justify-center rounded-lg text-sm transition-colors outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-60",
   {
     variants: {
       variant: {

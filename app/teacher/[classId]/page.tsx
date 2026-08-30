@@ -751,7 +751,7 @@ function Students({
                       { filter, student: entry.membershipId },
                       PANEL_ANCHOR,
                     )}
-                    className="rounded-sm text-xs font-medium text-primary outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                    className="rounded-sm text-xs font-medium text-primary outline-none hover:underline focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                   >
                     Xem<span className="sr-only"> {nameOf(entry)}</span>{" "}
                     <span aria-hidden>→</span>
@@ -1087,7 +1087,7 @@ function Lessons({
                       lesson. */}
                   <Link
                     href={`/teacher/${classId}/sessions/${session.sessionId}`}
-                    className="rounded-sm text-xs font-medium text-primary outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                    className="rounded-sm text-xs font-medium text-primary outline-none hover:underline focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                   >
                     Mở
                     <span className="sr-only">

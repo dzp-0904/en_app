@@ -62,7 +62,9 @@ export default async function TeacherClassesPage() {
   }
 
   const supabase = await createClient();
-  const classes = await loadTeacherClasses(supabase, state.teacher.userId);
+  // `loadUserState` has already read the class rows; only the roster tally is
+  // still outstanding, so that is all this asks for.
+  const classes = await loadTeacherClasses(supabase, state.teacher.classes);
 
   return (
     <PageShell width="3xl" align="start">

@@ -3,10 +3,10 @@ import "server-only";
 import type { MemberStatus } from "@/lib/score";
 import type { createClient } from "@/lib/supabase/server";
 import {
-  loadTeacherClassList,
   tallyClassMembers,
   withMemberCounts,
   type TeacherClass,
+  type TeacherClassFields,
 } from "@/lib/teacher";
 
 /**
@@ -85,11 +85,8 @@ function logDbError(
 
 export async function loadTeacherDashboard(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  teacherId: string,
+  classes: TeacherClassFields[],
 ): Promise<TeacherDashboard | null> {
-  const classes = await loadTeacherClassList(supabase, teacherId);
-  if (classes === null) return null;
-
   if (classes.length === 0) {
     return {
       classes: [],

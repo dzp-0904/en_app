@@ -19,7 +19,6 @@ import {
 } from "@/components/ui/table";
 import { loadUserState } from "@/lib/onboarding";
 import { createClient } from "@/lib/supabase/server";
-import { loadTeacherClassList } from "@/lib/teacher";
 import {
   PAYMENT_STATUS_LABELS,
   formatMoney,
@@ -72,10 +71,15 @@ export default async function TeacherTuitionPage() {
   }
 
   const supabase = await createClient();
-  const classes = await loadTeacherClassList(supabase, state.teacher.userId);
 
-  const records =
-    classes === null ? null : await loadTeacherTuition(supabase, classes);
+  // The class list comes off the context rather than from a query of its own.
+  // `loadUserState` already read it to classify the caller, and re-reading it
+  // here cost this page a whole extra Supabase round trip — the single change
+  // with the largest measured effect in M24. A failed read never reaches this
+  // line: it is reported one layer up as an unplaceable account.
+  const classes = state.teacher.classes;
+
+  const records = await loadTeacherTuition(supabase, classes);
 
   const summary = records === null ? null : summarise(records);
 
@@ -90,7 +94,7 @@ export default async function TeacherTuitionPage() {
         meta={["Sổ theo dõi học phí của các lớp bạn đang dạy"]}
       />
 
-      {classes === null || records === null || summary === null ? (
+      {records === null || summary === null ? (
         <Alert>
           Chúng tôi chưa tải được sổ học phí. Vui lòng tải lại trang.
         </Alert>

@@ -16,7 +16,6 @@ import {
   loadTeacherReports,
 } from "@/lib/reports";
 import { createClient } from "@/lib/supabase/server";
-import { loadTeacherClassList } from "@/lib/teacher";
 
 export const metadata: Metadata = {
   title: "Báo cáo",
@@ -69,10 +68,15 @@ export default async function TeacherReportsPage() {
   }
 
   const supabase = await createClient();
-  const classes = await loadTeacherClassList(supabase, state.teacher.userId);
 
-  const reports =
-    classes === null ? null : await loadTeacherReports(supabase, classes);
+  // The class list comes off the context rather than from a query of its own.
+  // `loadUserState` already read it to classify the caller, and re-reading it
+  // here cost this page a whole extra Supabase round trip — the single change
+  // with the largest measured effect in M24. A failed read never reaches this
+  // line: it is reported one layer up as an unplaceable account.
+  const classes = state.teacher.classes;
+
+  const reports = await loadTeacherReports(supabase, classes);
 
   return (
     <PageShell width="4xl" align="start">
@@ -85,7 +89,7 @@ export default async function TeacherReportsPage() {
         meta={["Báo cáo tiến bộ hàng tháng gửi cho phụ huynh"]}
       />
 
-      {classes === null || reports === null ? (
+      {reports === null ? (
         <Alert>
           Chúng tôi chưa tải được báo cáo của bạn. Vui lòng tải lại trang.
         </Alert>

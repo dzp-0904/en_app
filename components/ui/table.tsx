@@ -51,7 +51,7 @@ function Table({
         data-slot="table-scroller"
         tabIndex={0}
         {...(label ? { role: "region", "aria-label": label } : {})}
-        className="overflow-x-auto outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+        className="overflow-x-auto outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
       >
         <table
           data-slot="table"

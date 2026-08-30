@@ -59,7 +59,7 @@ function Breadcrumb({
               ) : item.href ? (
                 <Link
                   href={item.href}
-                  className="rounded-sm text-muted-foreground transition-colors outline-none hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  className="rounded-sm text-muted-foreground transition-colors outline-none hover:text-primary focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 >
                   {item.label}
                 </Link>

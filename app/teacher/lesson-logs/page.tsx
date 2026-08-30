@@ -24,7 +24,7 @@ import {
 } from "@/lib/lesson-logs";
 import { loadUserState } from "@/lib/onboarding";
 import { createClient } from "@/lib/supabase/server";
-import { isUuid, loadTeacherClassList } from "@/lib/teacher";
+import { isUuid } from "@/lib/teacher";
 
 export const metadata: Metadata = {
   title: "Nhật ký buổi học",
@@ -117,7 +117,13 @@ export default async function TeacherLessonLogsPage({
   }
 
   const supabase = await createClient();
-  const classes = await loadTeacherClassList(supabase, state.teacher.userId);
+
+  // The class list comes off the context rather than from a query of its own.
+  // `loadUserState` already read it to classify the caller, and re-reading it
+  // here cost this page a whole extra Supabase round trip — the single change
+  // with the largest measured effect in M24. A failed read never reaches this
+  // line: it is reported one layer up as an unplaceable account.
+  const classes = state.teacher.classes;
 
   const params = await searchParams;
 
@@ -127,16 +133,16 @@ export default async function TeacherLessonLogsPage({
   // A malformed id is not a database error waiting to happen: it is simply not
   // a filter. `isUuid` is the same predicate the class routes use.
   const classId =
-    rawClass && isUuid(rawClass) && classes?.some((one) => one.classId === rawClass)
+    rawClass && isUuid(rawClass) && classes.some((one) => one.classId === rawClass)
       ? rawClass
       : null;
 
   const skill = rawSkill && isSkill(rawSkill) ? rawSkill : null;
 
-  const logs =
-    classes === null
-      ? null
-      : await loadTeacherLessonLogs(supabase, classes, { classId, skill });
+  const logs = await loadTeacherLessonLogs(supabase, classes, {
+    classId,
+    skill,
+  });
 
   const selected = { classId, skill };
 
@@ -184,7 +190,7 @@ export default async function TeacherLessonLogsPage({
         }
       />
 
-      {classes === null || logs === null ? (
+      {logs === null ? (
         <Alert>
           Chúng tôi chưa tải được ghi chú buổi học. Vui lòng tải lại trang.
         </Alert>

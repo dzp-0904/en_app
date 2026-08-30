@@ -82,7 +82,7 @@ export default async function TeacherPage() {
     redirect("/");
   }
 
-  const { userId, fullName } = state.teacher;
+  const { fullName } = state.teacher;
 
   // The same condition the layout uses to decide whether to draw the shell. A
   // teacher who has not finished setting up is not given it, and this page is
@@ -91,7 +91,10 @@ export default async function TeacherPage() {
   const framed = isOnboardingComplete(state.teacher);
 
   const supabase = await createClient();
-  const dashboard = await loadTeacherDashboard(supabase, userId);
+  // The class rows come off the context — `loadUserState` has already read
+  // them — so the dashboard starts at its own queries instead of spending a
+  // round trip re-fetching a list it was handed.
+  const dashboard = await loadTeacherDashboard(supabase, state.teacher.classes);
 
   const classes = dashboard?.classes ?? [];
   const preview = classes.slice(0, PREVIEW);

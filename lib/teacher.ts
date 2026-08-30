@@ -366,20 +366,23 @@ export function withMemberCounts(
 }
 
 /**
- * The class list plus its roster tallies — what `/teacher/classes` and the
- * dashboard's class cards show.
+ * Roster tallies attached to class rows the caller already has — what
+ * `/teacher/classes` shows.
  *
- * Two sequential round trips by necessity: the second query is scoped to the
- * ids the first returned. A caller that has other work to do alongside the
- * tally should compose `loadTeacherClassList`, `tallyClassMembers` and
- * `withMemberCounts` itself rather than await this.
+ * It takes the rows rather than a teacher id because in M24 every caller
+ * already holds them: `loadUserState` reads the class list to classify the
+ * request, so asking for it again by id would spend a Supabase round trip
+ * re-fetching rows that are in memory. One trip remains, for the tally, and it
+ * is unavoidable — the count is scoped to the ids.
+ *
+ * A caller with other work to do alongside the tally should compose
+ * `tallyClassMembers` and `withMemberCounts` itself rather than await this;
+ * `loadTeacherDashboard` does exactly that.
  */
 export async function loadTeacherClasses(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  teacherId: string,
+  classes: TeacherClassFields[],
 ): Promise<TeacherClass[] | null> {
-  const classes = await loadTeacherClassList(supabase, teacherId);
-  if (classes === null) return null;
   if (classes.length === 0) return [];
 
   const counts = await tallyClassMembers(

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
-import { PendingBar } from "@/components/ui/pending-bar";
+import { PendingTint } from "@/components/ui/pending-tint";
 
 /**
  * The sidebar's list of sections, which knows which one you are looking at.
@@ -100,7 +100,7 @@ export function Nav({
                 href={entry.href}
                 aria-current={current ? "page" : undefined}
                 className={cn(
-                  "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                  "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                   current
                     ? "bg-secondary text-secondary-foreground"
                     : "text-muted-foreground hover:bg-background hover:text-foreground",
@@ -110,7 +110,7 @@ export function Nav({
                   {entry.icon}
                 </span>
                 {entry.label}
-                <PendingBar />
+                <PendingTint />
               </Link>
             </li>
           );
