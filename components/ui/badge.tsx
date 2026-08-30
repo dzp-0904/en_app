@@ -47,11 +47,15 @@ import { cn } from "@/lib/utils";
  * darker, still the same family, and it costs 0.56 of a contrast ratio it has
  * to spare.
  *
- * `primary` is the exception and is left as the Figma sets it, at 4.22:1.
- * Nothing renders it: the three tones the roster's status vocabulary needs are
- * green, neutral and orange. The same pair already ships in `nav-item.tsx`'s
- * active state, so changing it here would either fix half of a problem or drag
- * the sidebar into a milestone about one page. It is still open.
+ * `primary` was the last one left at the Figma's own 4.22:1, on the grounds
+ * that nothing rendered it. The student overview's lesson notes do: the Figma
+ * writes a `Good` performance in #4466EE on its own tint, and that is the pair
+ * this variant is. The foreground moves to `--primary-hover`, which is 5.31:1
+ * on `--secondary` and is already the palette's darker indigo — the button's
+ * hover fill — so this is the existing token doing a second job rather than a
+ * sixth colour. `--secondary-foreground` is untouched, and so is the same pair
+ * in `nav-item.tsx`'s active state: that one is a 14px link on a sidebar and is
+ * still open, for the sidebar's own milestone.
  */
 const badgeVariants = cva(
   "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
@@ -59,7 +63,7 @@ const badgeVariants = cva(
     variants: {
       tone: {
         neutral: "bg-muted text-muted-foreground",
-        primary: "bg-secondary text-secondary-foreground",
+        primary: "bg-secondary text-primary-hover",
         green: "bg-green-light text-green-dark",
         orange: "bg-orange-light text-orange-dark",
         destructive: "bg-destructive-light text-destructive",

@@ -410,15 +410,29 @@ export async function loadTeacherClass(
   // Only now that ownership is established. A left join on the profile, not
   // `!inner`: a pending invitation has no `student_id` yet, and requiring one
   // would hide exactly the rows the teacher most needs to see.
-  const { data: members, error: rosterError } = await supabase
-    .from("class_members")
-    .select(
-      "id, join_status, invited_email, invited_name, invited_at, invite_email_sent_at, joined_at, target_band, strengths, focus_areas, profiles!class_members_student_id_fkey(full_name, email)",
-    )
-    .eq("class_id", classId)
-    .in("join_status", PRESENT)
-    .is("removed_at", null)
-    .order("created_at", { ascending: true });
+  //
+  // The roster and the invitation code are fetched together. Neither reads the
+  // other and both are already gated by the check above, so awaiting the code
+  // after the roster only cost the caller one round trip — around a seventh of
+  // this page's server time, measured against the hosted project — for an
+  // ordering nothing needed. The gate itself stays sequential: `loadEditableClass`
+  // is what proves the class is this teacher's, and nothing below it may run
+  // before it answers.
+  const [
+    { data: members, error: rosterError },
+    inviteCode,
+  ] = await Promise.all([
+    supabase
+      .from("class_members")
+      .select(
+        "id, join_status, invited_email, invited_name, invited_at, invite_email_sent_at, joined_at, target_band, strengths, focus_areas, profiles!class_members_student_id_fkey(full_name, email)",
+      )
+      .eq("class_id", classId)
+      .in("join_status", PRESENT)
+      .is("removed_at", null)
+      .order("created_at", { ascending: true }),
+    loadInviteCode(supabase, classId),
+  ]);
 
   if (rosterError) {
     logDbError("class_members.select", rosterError);
@@ -457,7 +471,7 @@ export async function loadTeacherClass(
       studentCount: roster.filter((entry) => entry.status === "joined").length,
       pendingCount: roster.filter((entry) => entry.status === "invited").length,
       roster,
-      inviteCode: await loadInviteCode(supabase, classId),
+      inviteCode,
     },
   };
 }

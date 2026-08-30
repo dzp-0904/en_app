@@ -30,7 +30,11 @@ import {
 import { Tabs } from "@/components/ui/tabs";
 import { ATTENDANCE_LABELS, type AttendanceStatus } from "@/lib/attendance";
 import { LABELS, isOfferedCourseType } from "@/lib/course-type";
-import { PERFORMANCE_LABELS, SKILL_LABELS } from "@/lib/lesson-log";
+import {
+  PERFORMANCE_LABELS,
+  SKILL_LABELS,
+  type Performance,
+} from "@/lib/lesson-log";
 import { loadUserState } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
 import {
@@ -208,6 +212,24 @@ const ATTENDANCE_TONES: Record<
   excused: "neutral",
 };
 
+/**
+ * The four lesson-note performances, tinted.
+ *
+ * Straight off the Figma, which colours this vocabulary itself: Excellent
+ * #3BA876, Good #4466EE, Developing #E8834A, Needs Attention #EF4444 — the
+ * green, primary, orange and destructive pairs, in that order. Nothing is
+ * reinterpreted; `PERFORMANCE_LABELS` supplies the word beside every tint.
+ */
+const PERFORMANCE_TONES: Record<
+  Performance,
+  "green" | "primary" | "orange" | "destructive"
+> = {
+  excellent: "green",
+  good: "primary",
+  developing: "orange",
+  needs_attention: "destructive",
+};
+
 export default async function TeacherClassPage({
   params,
   searchParams,
@@ -292,7 +314,9 @@ export default async function TeacherClassPage({
   // two views, for the same class: it is where "current band", "skills" and
   // "status" come from, and it is the only reason those columns can exist
   // without this page working any of them out for itself. Nothing is loaded for
-  // an unbanded class, which has no bands to load.
+  // an unbanded class, which has no bands to load. It is not gated on the tab:
+  // the counts above the tab strip are drawn from it, and they are drawn on all
+  // three.
   //
   // Nothing is loaded for the panel unless a student is selected, so the roster
   // costs a teacher who has not opened one exactly what it did before.
@@ -302,7 +326,16 @@ export default async function TeacherClassPage({
     // is deliberately not `[]`: "no lessons have been recorded yet" is a claim
     // about the class, and the page is not entitled to make it on the strength
     // of a query that did not come back.
-    loadClassSessions(supabase, detail.classId),
+    //
+    // Only on the tab that renders it. `Lessons` is the sole reader, so on
+    // Students and Class Info this was a table scan of `class_sessions` whose
+    // result was discarded — and one paid three times over now that the tab
+    // strip prefetches its siblings. It costs no wall time to drop, because it
+    // ran beside `loadClassBands` rather than before it, but it is a query the
+    // database was answering for nobody.
+    tab === "lessons"
+      ? loadClassSessions(supabase, detail.classId)
+      : Promise.resolve(null),
     banded ? loadClassBands(supabase, detail.classId) : Promise.resolve(null),
     selected
       ? loadStudentOverview(supabase, detail.classId, selected)
@@ -412,6 +445,10 @@ export default async function TeacherClassPage({
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <Tabs
           label="Class views"
+          // See PREFETCH in `tabs.tsx`. These three views are one class the
+          // teacher is already reading, so the background render exposes
+          // nothing a click a second later would not have.
+          prefetch
           items={TABS.map((item) => ({
             label: item.label,
             href: hrefFor(detail.classId, { tab: item.id, filter }),
@@ -1082,12 +1119,36 @@ function Lessons({
  * writes it.
  *
  * This is the card the roster used to be, for one student at a time. Before
- * this milestone every student's target-band picker and tag editors were
- * rendered at once, one stack of forms per person; the Figma's table has no
- * room for that and does not need it, so the controls follow the selection.
- * Nothing was removed — the goal, the strengths, the focus areas and the
- * removal are all still here, still the same Server Actions, still posting
- * without JavaScript.
+ * M18 every student's target-band picker and tag editors were rendered at once,
+ * one stack of forms per person; the Figma's table has no room for that and
+ * does not need it, so the controls follow the selection. Nothing was removed —
+ * the goal, the strengths, the focus areas and the removal are all still here,
+ * still the same Server Actions, still posting without JavaScript.
+ *
+ * WHAT THE FIGMA DRAWS. `src/pages/teacher/StudentProfile.tsx` is a full page:
+ * a `rounded-2xl` header card carrying the avatar, the name and a band journey
+ * on a `#F7F6F1` strip; a four-across row of skill cards; then a segmented
+ * control over a two-column body. This is that page, laid out as the panel
+ * EduTrack opens on `?student=`, and it is a stack of cards on the page ground
+ * rather than one card with rules through it — which is what makes a panel look
+ * like the Figma's page without becoming one.
+ *
+ * WHAT IT DOES NOT. The Figma's header runs "+ Lesson note" and "Generate
+ * report" buttons; the first belongs to a lesson, which is where EduTrack
+ * writes notes from, and the second has no handler in the Figma and no feature
+ * behind it here. The affordance in that corner is Close, because unlike the
+ * Figma this is a panel and there is something to close it back to. It stays a
+ * link to the roster row, so it works with scripting off and Back still means
+ * back.
+ *
+ * The Figma's tab strip is not reproduced either. Its three tabs are Learning
+ * Profile, Lesson History and Homework: the first is built around a recharts
+ * line chart, the second is the lesson notes below, and the third has no table
+ * behind it in this schema. Reduced to what EduTrack can truthfully fill, the
+ * strip would hold one tab and a half — and each press of it would be another
+ * server round trip on the page this milestone is making faster. The sections
+ * are laid out instead, which is also the only arrangement that keeps every
+ * fact reachable with JavaScript switched off.
  *
  * `overview` may be null while `entry` is not: the roster row proved the
  * student is on this class list, and the overview query is a separate read that
@@ -1110,11 +1171,13 @@ function StudentPanel({
   filter: Filter;
   timezone: string;
 }) {
+  const bands = overview?.bands ?? null;
+
   return (
     <section
       id={PANEL_ANCHOR}
       aria-label={`${nameOf(entry)} — overview`}
-      className="mb-6 min-w-0 rounded-xl border border-border bg-card p-6"
+      className="mb-6 min-w-0 space-y-5"
     >
       {/* One list for every tag input below. A datalist is a suggestion and not
           a constraint — both columns are free text, and a teacher typing "Task 2
@@ -1125,48 +1188,83 @@ function StudentPanel({
         ))}
       </datalist>
 
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex min-w-0 grow basis-64 items-center gap-3">
-          <Avatar name={nameOf(entry)} size="lg" />
-          <div className="min-w-0">
-            <h2 className="font-semibold break-words text-foreground">
-              {nameOf(entry)}
-            </h2>
-            {entry.name && entry.email ? (
-              <p className="text-sm break-words text-muted-foreground">
-                {entry.email}
+      {/* `rounded-2xl`, one step rounder than every other card on the screen.
+          That is the Figma's own distinction: the student header is the only
+          `rounded-2xl` surface in the file, and it is what marks the block as
+          the subject of the page rather than one more panel on it. */}
+      <div className="min-w-0 rounded-2xl border border-border bg-card p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex min-w-0 grow basis-64 items-center gap-4">
+            {/* The Figma's `w-14 h-14 rounded-2xl bg-[#EDF0FF] text-[#4466EE]
+                text-lg` is `Avatar size="lg"` exactly, down to the corner
+                radius. No image: EduTrack stores no avatars, and initials are
+                what the Figma draws anyway. */}
+            <Avatar name={nameOf(entry)} size="lg" />
+
+            <div className="min-w-0">
+              <h2 className="text-xl font-semibold break-words text-foreground">
+                {nameOf(entry)}
+              </h2>
+
+              {/* The Figma prints the class name on this line. This page is
+                  already titled with it, so the line carries the one identifier
+                  a teacher looking at two students with the same first name
+                  actually needs. */}
+              {entry.name && entry.email ? (
+                <p className="mt-0.5 text-sm break-words text-muted-foreground">
+                  {entry.email}
+                </p>
+              ) : null}
+
+              <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
+                {entry.joinedAt ? (
+                  <span>Joined {DATE.format(new Date(entry.joinedAt))}</span>
+                ) : null}
+                {/* Beside the name because the Figma has no home for it — its
+                    own header carries an exam date instead, which EduTrack does
+                    not record. The value is `v_member_performance_status`'s, not
+                    this page's, and the badge spells it out in words. */}
+                {bands ? (
+                  <Badge tone={STATUS_TONES[bands.status]}>
+                    {MEMBER_STATUS_LABELS[bands.status]}
+                  </Badge>
+                ) : null}
               </p>
-            ) : null}
-            {entry.joinedAt ? (
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Joined {DATE.format(new Date(entry.joinedAt))}
-              </p>
-            ) : null}
+            </div>
           </div>
+
+          <Button asChild variant="outline" size="sm">
+            <Link href={hrefFor(classId, { filter }, anchorFor(entry))}>
+              Close
+            </Link>
+          </Button>
         </div>
 
-        <Button asChild variant="outline" size="sm">
-          <Link href={hrefFor(classId, { filter }, anchorFor(entry))}>
-            Close
-          </Link>
-        </Button>
+        {banded && bands ? <Journey bands={bands} /> : null}
       </div>
 
-      <div className="mt-6 space-y-6">
-        {banded ? <TargetBand entry={entry} classId={classId} /> : null}
+      {banded && bands ? <SkillCards bands={bands} /> : null}
 
-        <Standing entry={entry} classId={classId} />
-
+      <div className="grid min-w-0 gap-5 lg:grid-cols-2">
         {overview ? (
-          <Overview
-            overview={overview}
-            banded={banded}
-            timezone={timezone}
-          />
+          <div className="min-w-0 space-y-5">
+            {banded ? <ScoreHistory scores={overview.scores} /> : null}
+            <AttendanceList marks={overview.attendance} timezone={timezone} />
+          </div>
         ) : null}
+
+        <div className="min-w-0 space-y-5">
+          {banded ? <TargetBand entry={entry} classId={classId} /> : null}
+          <Standing entry={entry} classId={classId} />
+        </div>
       </div>
 
-      <div className="mt-6 border-t border-border pt-4">
+      {overview ? <LessonNotes notes={overview.notes} /> : null}
+
+      <div className="min-w-0 rounded-xl border border-border bg-card p-5">
+        <h3 className="text-sm font-semibold text-foreground">
+          Remove from class
+        </h3>
         <Confirm
           label="Remove student"
           prompt={`${nameOf(entry)} will be taken off this class list. Their account and any other classes they are in are not affected.`}
@@ -1180,6 +1278,364 @@ function StudentPanel({
 }
 
 /**
+ * Where this student started, where they are, and where they are going.
+ *
+ * The Figma's band journey, on its `#F7F6F1` strip inside the header card, with
+ * the same three values in the same order and the same three colours: the
+ * starting band grey, the current band indigo, the target green.
+ *
+ * WITHOUT THE BAR. The Figma runs a progress bar between Starting and Current
+ * captioned "{n}% to target", filled from
+ * `((current - start) / (target - start)) * 100`. That number is not one
+ * EduTrack has. It is not on `v_member_current_band`, no view computes it, and
+ * working it out here would be this page inventing a metric and then presenting
+ * it as a fact about a student — the same thing the attendance percentage was
+ * refused for in M18. The three bands it is derived from are all real and are
+ * all shown; the arithmetic over them is not, so it is left out rather than
+ * approximated.
+ *
+ * `currentRecordedOn` is shown because the Figma's chart has a time axis and
+ * this is the only part of it EduTrack can answer honestly: it says how old the
+ * current band is, which is the question a plotted line is being asked. It is
+ * the view's own column, read, not computed.
+ */
+function Journey({ bands }: { bands: StudentOverview["bands"] }) {
+  // Nothing to say rather than three empty slots: a student nobody has assessed
+  // has no starting band, no current band and no goal, and printing "Not
+  // recorded" three times in 24px says less than one sentence does.
+  const unassessed =
+    bands.targetBand === null &&
+    bands.startOverall === null &&
+    bands.currentOverall === null;
+
+  return (
+    <div className="mt-6 min-w-0 rounded-xl bg-background p-4">
+      {unassessed ? (
+        <Empty>No bands have been recorded yet.</Empty>
+      ) : (
+        <div className="flex min-w-0 flex-wrap items-end gap-x-6 gap-y-4">
+          <Milestone
+            term="Starting"
+            band={bands.startOverall}
+            empty="Not recorded"
+            className="text-muted-foreground"
+          />
+          <Milestone
+            term="Current"
+            band={bands.currentOverall}
+            empty="Not recorded"
+            className="text-primary"
+          />
+          {/* Decorative: the two words either side already say which way this
+              reads, so the arrow is hidden rather than announced. */}
+          <span aria-hidden className="pb-1.5 text-muted-foreground">
+            →
+          </span>
+          {/* `--green-dark`, not the Figma's #3BA876, which is 2.75:1 on this
+              strip and fails even the large-text floor. The M18 substitution. */}
+          <Milestone
+            term="Target"
+            band={bands.targetBand}
+            empty="Not set"
+            className="text-green-dark"
+          />
+
+          {bands.currentRecordedOn ? (
+            <p className="pb-1.5 text-xs text-muted-foreground sm:ml-auto">
+              Current band recorded{" "}
+              {DATE.format(asDate(bands.currentRecordedOn))}
+            </p>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One of the journey's three bands, or the reason there isn't one. */
+function Milestone({
+  term,
+  band,
+  empty,
+  className,
+}: {
+  term: string;
+  band: number | null;
+  empty: string;
+  className: string;
+}) {
+  const value = formatBand(band);
+
+  return (
+    <div className="min-w-0">
+      <p className="mb-1 text-xs text-muted-foreground">{term}</p>
+      {value === null ? (
+        <p className="text-sm font-medium text-muted-foreground">{empty}</p>
+      ) : (
+        <p className={`text-2xl font-bold ${className}`}>{value}</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The four skills, each on its own card.
+ *
+ * The Figma's `grid grid-cols-4 gap-3` row, with its label, its `text-2xl`
+ * value, its `h-1.5` bar and its target footnote. Four across becomes two at
+ * the narrow end, because four 24px numbers do not fit across a 320px screen.
+ *
+ * WITHOUT THE DELTA. Each Figma card carries a coloured `+0.5` beside the
+ * value, the difference between the current skill band and the starting one.
+ * `v_member_current_band` records a starting band for the overall score only —
+ * there is no `start_reading` — so the difference cannot be computed for any of
+ * these four without inventing the number it is measured from. The bar is
+ * therefore always indigo rather than turning green on improvement, since that
+ * colour is driven by the same missing value.
+ *
+ * A skill nobody has measured says so. `null` on the view means not measured,
+ * and a bar drawn at zero would read as a band of zero — the distinction the
+ * roster's own skill column already makes.
+ */
+function SkillCards({ bands }: { bands: StudentOverview["bands"] }) {
+  return (
+    <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-4">
+      {BAND_SKILLS.map((skill) => {
+        const capitalised = (skill.charAt(0).toUpperCase() +
+          skill.slice(1)) as Capitalize<typeof skill>;
+
+        return (
+          <div
+            key={skill}
+            className="min-w-0 rounded-xl border border-border bg-card p-4"
+          >
+            <p className="mb-2 text-xs font-medium text-muted-foreground">
+              {BAND_FIELD_LABELS[skill]}
+            </p>
+
+            <SkillValue band={bands[`current${capitalised}`]} />
+
+            {bands.targetBand === null ? null : (
+              <p className="mt-1.5 text-[10px] text-muted-foreground">
+                Target {formatBand(bands.targetBand)}
+              </p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** One skill's band and its bar, or the fact that it has neither. */
+function SkillValue({ band }: { band: number | null }) {
+  if (band === null) {
+    return <p className="text-sm text-muted-foreground">Not recorded</p>;
+  }
+
+  return (
+    <>
+      <p className="mb-1.5 text-2xl font-bold text-foreground">
+        {formatBand(band)}
+      </p>
+      {/* The number is above it, so the bar is the same decoration it is on the
+          roster and carries no label of its own. */}
+      <ProgressBar value={band} max={9} />
+    </>
+  );
+}
+
+/**
+ * Every band this student has been given, newest first.
+ *
+ * This is where the Figma's line chart would go, and it is a list instead. The
+ * chart is recharts, which this milestone may not install, and the entries are
+ * append-only records rather than points on a curve: an entry has a type, a
+ * date, up to five bands and a note, and only two of those survive a plot. The
+ * list keeps all of them.
+ *
+ * Read-only, as it has been since M16. `score_entries` is append-only — a
+ * correction is a removal and a fresh record, never an UPDATE — and the removal
+ * is offered on the lesson page that recorded the entry, which is the page that
+ * knows the context. Adding a second one here would be a second place to keep
+ * that rule correct.
+ */
+function ScoreHistory({ scores }: { scores: StudentOverview["scores"] }) {
+  return (
+    <Card title="Score history">
+      {scores.length === 0 ? (
+        <Empty>No score entries yet.</Empty>
+      ) : (
+        <ul className="min-w-0 space-y-3">
+          {scores.map((score) => (
+            <li
+              key={score.entryId}
+              className="min-w-0 border-t border-border pt-3 first:border-0 first:pt-0"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                {/* `recorded_on` is a bare `date` — a calendar square, read as
+                    one. No instant, and so no zone conversion. */}
+                <p className="text-sm font-semibold text-foreground">
+                  {DATE.format(asDate(score.recordedOn))}
+                </p>
+                {/* One tone for all three types. The Figma gives the entry
+                    kinds no colour vocabulary of their own, and inventing one
+                    would put a meaning in the tint that nothing else on the
+                    screen agrees with. The label carries it. */}
+                <Badge>{SCORE_ENTRY_TYPE_LABELS[score.entryType]}</Badge>
+              </div>
+
+              <p className="mt-1 text-xs break-words text-muted-foreground">
+                {bandsOf(score)}
+              </p>
+
+              {score.note ? (
+                <p className="mt-1.5 text-sm break-words text-foreground">
+                  {score.note}
+                </p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * Every lesson this student was marked at.
+ *
+ * The Figma's student profile has no attendance anywhere — its teacher table
+ * reduces the whole subject to one percentage — so this section is EduTrack's
+ * and is drawn in the Figma's card vocabulary rather than after any block of
+ * it. All four statuses keep their own word and their own tint: `excused` in
+ * particular is the one that takes a lesson out of the reckoning altogether,
+ * and a percentage cannot say so. No percentage is computed here, for the
+ * reason M18 refused one.
+ */
+function AttendanceList({
+  marks,
+  timezone,
+}: {
+  marks: StudentOverview["attendance"];
+  timezone: string;
+}) {
+  return (
+    <Card title="Attendance">
+      {marks.length === 0 ? (
+        <Empty>No attendance recorded yet.</Empty>
+      ) : (
+        <ul className="min-w-0 space-y-3">
+          {marks.map((mark) => (
+            <li
+              key={mark.sessionId}
+              className="min-w-0 border-t border-border pt-3 first:border-0 first:pt-0"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                {/* The class's own clock, through `lib/time.ts`, exactly as the
+                    lesson list reads the same two instants. */}
+                <p className="min-w-0 text-sm font-semibold break-words text-foreground">
+                  {formatZonedDate(timezone, mark.startsAt)}
+                </p>
+                <Badge tone={ATTENDANCE_TONES[mark.status]}>
+                  {ATTENDANCE_LABELS[mark.status]}
+                </Badge>
+              </div>
+
+              <p className="mt-1 text-xs break-words text-muted-foreground">
+                {formatZonedTime(timezone, mark.startsAt)} –{" "}
+                {formatZonedTime(timezone, mark.endsAt)}
+                {mark.sessionTitle ? ` · ${mark.sessionTitle}` : ""}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * The lesson notes written about this student, newest first.
+ *
+ * The Figma's Lesson History tab, card for card: the date and the skill on one
+ * line, the topic under it, the performance as a tinted pill on the right, and
+ * the note itself in a `#F7F6F1` block labelled "Teacher note". Each note is
+ * its own card rather than a row in a list, which is the Figma's arrangement
+ * and is also what lets a long note stay readable.
+ *
+ * Two things the Figma's card carries are absent. It shows a row of mistake
+ * chips — `lesson_logs.mistakes` does exist, but nothing in EduTrack writes to
+ * it, so every row's array is the empty default and the block would render for
+ * no one. And it offers an Edit button; notes are edited where they are
+ * written, on the lesson, and this milestone does not add a second route to
+ * them.
+ *
+ * The Figma sets the note in italics inside literal quotation marks. The
+ * italics are kept; the quote characters are not, because they are read out as
+ * punctuation and the labelled block above already says whose words these are.
+ */
+function LessonNotes({ notes }: { notes: StudentOverview["notes"] }) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-foreground">Lesson notes</h3>
+        {notes.length > 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {notes.length} {notes.length === 1 ? "note" : "notes"}
+          </p>
+        ) : null}
+      </div>
+
+      {notes.length === 0 ? (
+        <p className="rounded-xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+          No lesson notes yet.
+        </p>
+      ) : (
+        <div className="min-w-0 space-y-3">
+          {notes.map((note) => (
+            <article
+              key={note.noteId}
+              className="min-w-0 rounded-xl border border-border bg-card p-5"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 grow basis-48">
+                  <p className="text-sm font-semibold break-words text-foreground">
+                    {DATE.format(asDate(note.lessonDate))}
+                    <span className="font-normal text-muted-foreground">
+                      {" "}
+                      — {SKILL_LABELS[note.skill]}
+                    </span>
+                  </p>
+                  <p className="mt-0.5 text-xs break-words text-muted-foreground">
+                    {note.topic}
+                  </p>
+                </div>
+
+                <Badge tone={PERFORMANCE_TONES[note.performance]}>
+                  {PERFORMANCE_LABELS[note.performance]}
+                </Badge>
+              </div>
+
+              {note.note ? (
+                <div className="mt-3 min-w-0 rounded-lg bg-background p-3">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Teacher note
+                  </p>
+                  <p className="mt-1 text-sm break-words text-foreground italic">
+                    {note.note}
+                  </p>
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * One student's goal, and the way to change it.
  *
  * The saved value is printed above the picker rather than left to the
@@ -1188,6 +1644,8 @@ function StudentPanel({
  * still holds the old one. The line is read from the roster on every render, so
  * it is always the stored goal — the picker is the editor, the line is the
  * truth, exactly as `Standing` and `ScoreForm` are split on the session page.
+ * It is set in the Figma's green at the Figma's `text-2xl font-bold`, because
+ * it is the same number the journey's third milestone shows.
  *
  * The options are `BAND_VALUES`, `public.band`'s CHECK written out, plus one
  * explicit "Not set" carrying the empty string. A goal that has not been set is
@@ -1214,19 +1672,27 @@ function TargetBand({
   const field = `target-${entry.membershipId}`;
 
   return (
-    <form action={setTargetBand.bind(null, classId, entry.membershipId)}>
-      <label
-        htmlFor={field}
-        className="text-xs font-medium tracking-wide text-muted-foreground uppercase"
-      >
-        Target band
-      </label>
+    <div className="min-w-0 rounded-xl border border-border bg-card p-5">
+      <h3 className="text-sm font-semibold text-foreground">Target band</h3>
 
-      <p className="mt-1 text-sm text-foreground">{saved ?? "Not set"}</p>
+      {saved === null ? (
+        <p className="mt-2 text-sm text-muted-foreground">Not set</p>
+      ) : (
+        <p className="mt-2 text-2xl font-bold text-green-dark">{saved}</p>
+      )}
 
       {/* `flex-wrap` so the picker and the button stack rather than overflow
           once the panel is 390px wide. */}
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+      <form
+        action={setTargetBand.bind(null, classId, entry.membershipId)}
+        className="mt-3 flex flex-wrap items-center gap-2"
+      >
+        {/* The heading names the control on screen; this names it to a screen
+            reader, which does not read a sibling heading as a label. */}
+        <label htmlFor={field} className="sr-only">
+          Target band
+        </label>
+
         <select
           id={field}
           name="targetBand"
@@ -1242,8 +1708,8 @@ function TargetBand({
         </select>
 
         <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
-      </div>
-    </form>
+      </form>
+    </div>
   );
 }
 
@@ -1256,6 +1722,16 @@ function TargetBand({
  * saved. `saveStandingNotes` writes both columns in a single UPDATE for the
  * same reason.
  *
+ * The Figma gives these two lists a card each and tints their chips — strengths
+ * green, areas to improve orange. The tints are adopted; the two cards are not,
+ * because splitting them would put two headings around one Save and imply two
+ * saves. The `tone` prop on `TagEditor` is the whole of that change.
+ *
+ * The second list keeps EduTrack's name. The Figma heads it "Areas to Improve";
+ * the column is `focus_areas` and the student's own page calls it Focus areas,
+ * and renaming it on one screen would leave a teacher and a student looking at
+ * the same list under two different words.
+ *
  * Each `TagEditor` is keyed on its own saved list. That is what re-seeds the
  * pending state from the server after a save: the stored list changes, the key
  * changes, the editor remounts holding what was actually written. It also means
@@ -1267,193 +1743,40 @@ function TargetBand({
  */
 function Standing({ entry, classId }: { entry: RosterEntry; classId: string }) {
   return (
-    <form
-      action={saveStandingNotes.bind(null, classId, entry.membershipId)}
-      className="min-w-0 border-t border-border pt-5"
-    >
-      <TagEditor
-        key={`s:${entry.strengths.join("\u0000")}`}
-        label="Strengths"
-        hint="What this student does well"
-        name="strengths"
-        addName="addStrength"
-        saved={entry.strengths}
-        empty="No strengths recorded yet."
-        listId={SUGGESTION_LIST}
-      />
+    <div className="min-w-0 rounded-xl border border-border bg-card p-5">
+      <form action={saveStandingNotes.bind(null, classId, entry.membershipId)}>
+        <h3 className="text-sm font-semibold text-foreground">
+          Strengths and focus areas
+        </h3>
 
-      <TagEditor
-        key={`f:${entry.focusAreas.join("\u0000")}`}
-        label="Focus areas"
-        hint="What needs improvement"
-        name="focusAreas"
-        addName="addFocusArea"
-        saved={entry.focusAreas}
-        empty="No focus areas recorded yet."
-        listId={SUGGESTION_LIST}
-      />
+        <TagEditor
+          key={`s:${entry.strengths.join("\u0000")}`}
+          label="Strengths"
+          hint="What this student does well"
+          name="strengths"
+          addName="addStrength"
+          saved={entry.strengths}
+          empty="No strengths recorded yet."
+          listId={SUGGESTION_LIST}
+          tone="green"
+        />
 
-      <div className="mt-3">
-        <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
-      </div>
-    </form>
-  );
-}
+        <TagEditor
+          key={`f:${entry.focusAreas.join("\u0000")}`}
+          label="Focus areas"
+          hint="What needs improvement"
+          name="focusAreas"
+          addName="addFocusArea"
+          saved={entry.focusAreas}
+          empty="No focus areas recorded yet."
+          listId={SUGGESTION_LIST}
+          tone="orange"
+        />
 
-/**
- * One student's existing facts, gathered.
- *
- * A view and only a view. There is no form here and no Server Action: every one
- * of these values already has a dedicated control elsewhere on this page or on
- * the lesson pages, and a second way to write them would be a second thing to
- * keep correct.
- *
- * `banded` gates the two band sections for the same reason `TargetBand` is
- * gated: a class that scores on nothing has no bands to show, and the actions
- * that record them refuse the write for that class anyway.
- */
-function Overview({
-  overview,
-  banded,
-  timezone,
-}: {
-  overview: StudentOverview;
-  banded: boolean;
-  timezone: string;
-}) {
-  const { bands } = overview;
-
-  // Nothing to say rather than three empty rows: a student nobody has assessed
-  // has no starting band, no current band and no goal, and printing "Not set"
-  // three times says less than one sentence does.
-  const unassessed =
-    bands.targetBand === null &&
-    bands.startOverall === null &&
-    bands.currentOverall === null;
-
-  return (
-    <div className="min-w-0 space-y-5 border-t border-border pt-5">
-      {banded ? (
-        <Section title="Progress">
-          {unassessed ? (
-            <Empty>No bands have been recorded yet.</Empty>
-          ) : (
-            <dl className="space-y-2">
-              {/* Every value here is the database's own. `target_band`,
-                  `start_overall` and `current_overall` come off
-                  `v_member_current_band` and the status off
-                  `v_member_performance_status`; nothing is compared or averaged
-                  on this page. */}
-              <Fact
-                term="Target"
-                value={formatBand(bands.targetBand) ?? "Not set"}
-              />
-              <Fact
-                term="Starting"
-                value={formatBand(bands.startOverall) ?? "Not recorded"}
-              />
-              <Fact
-                term="Current"
-                value={formatBand(bands.currentOverall) ?? "Not recorded"}
-              />
-              <Fact
-                term="Status"
-                value={MEMBER_STATUS_LABELS[bands.status]}
-              />
-            </dl>
-          )}
-        </Section>
-      ) : null}
-
-      {/* Strengths and focus areas are not repeated here. They were their own
-          two sections while the overview was a panel of its own; now that the
-          editor above sits in the same card and prints the same two saved
-          lists, showing them twice would be one column rendered twice on one
-          screen. Nothing is lost — `Standing` reads the same values. */}
-
-      <Section title="Attendance">
-        {overview.attendance.length === 0 ? (
-          <Empty>No attendance recorded yet.</Empty>
-        ) : (
-          <ul className="space-y-2.5">
-            {overview.attendance.map((mark) => (
-              <li key={mark.sessionId} className="min-w-0">
-                {/* All four statuses, each with its own word and its own tint.
-                    The Figma's teacher table reduces attendance to one
-                    percentage; EduTrack records four distinct states per
-                    lesson, and `excused` in particular is the one that takes a
-                    lesson out of the reckoning altogether. */}
-                <Badge tone={ATTENDANCE_TONES[mark.status]}>
-                  {ATTENDANCE_LABELS[mark.status]}
-                </Badge>
-                {/* The class's own clock, through `lib/time.ts`, exactly as the
-                    lesson list reads the same two instants. */}
-                <p className="mt-1 text-xs break-words text-muted-foreground">
-                  {formatZonedDate(timezone, mark.startsAt)} ·{" "}
-                  {formatZonedTime(timezone, mark.startsAt)} –{" "}
-                  {formatZonedTime(timezone, mark.endsAt)}
-                  {mark.sessionTitle ? ` · ${mark.sessionTitle}` : ""}
-                </p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
-
-      {banded ? (
-        <Section title="Score history">
-          {overview.scores.length === 0 ? (
-            <Empty>No score entries yet.</Empty>
-          ) : (
-            <ul className="space-y-2.5">
-              {overview.scores.map((score) => (
-                <li key={score.entryId} className="min-w-0">
-                  {/* `recorded_on` is a bare `date` — a calendar square, read
-                      as one. No instant, and so no zone conversion. */}
-                  <p className="text-sm text-foreground">
-                    {DATE.format(asDate(score.recordedOn))} ·{" "}
-                    {SCORE_ENTRY_TYPE_LABELS[score.entryType]}
-                  </p>
-                  <p className="text-xs break-words text-muted-foreground">
-                    {bandsOf(score)}
-                  </p>
-                  {score.note ? (
-                    <p className="mt-1 text-sm break-words text-foreground">
-                      {score.note}
-                    </p>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-      ) : null}
-
-      <Section title="Lesson notes">
-        {overview.notes.length === 0 ? (
-          <Empty>No lesson notes yet.</Empty>
-        ) : (
-          <ul className="space-y-2.5">
-            {overview.notes.map((note) => (
-              <li key={note.noteId} className="min-w-0">
-                <p className="text-sm break-words text-foreground">
-                  {note.topic}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {DATE.format(asDate(note.lessonDate))} ·{" "}
-                  {SKILL_LABELS[note.skill]} ·{" "}
-                  {PERFORMANCE_LABELS[note.performance]}
-                </p>
-                {note.note ? (
-                  <p className="mt-1 text-sm break-words text-foreground">
-                    {note.note}
-                  </p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+        <div className="mt-4">
+          <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
+        </div>
+      </form>
     </div>
   );
 }
@@ -1474,13 +1797,17 @@ function bandsOf(score: StudentOverview["scores"][number]): string {
     .join(" · ");
 }
 
-/** One labelled block inside the overview. */
-function Section({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * One titled card in the overview.
+ *
+ * The Figma's body card: `bg-white rounded-xl border border-[#E8E6DE] p-5` with
+ * a `text-sm font-semibold` heading. `h3` because the student's name above it
+ * is the `h2` — the panel is one section of a page whose `h1` is the class.
+ */
+function Card({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="min-w-0">
-      <p className="mb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        {title}
-      </p>
+    <div className="min-w-0 rounded-xl border border-border bg-card p-5">
+      <h3 className="mb-3 text-sm font-semibold text-foreground">{title}</h3>
       {children}
     </div>
   );
@@ -1489,16 +1816,6 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 /** What a section says when the student has no history of that kind yet. */
 function Empty({ children }: { children: ReactNode }) {
   return <p className="text-sm text-muted-foreground">{children}</p>;
-}
-
-/** One term and its value, in the same shape as the class facts. */
-function Fact({ term, value }: { term: string; value: string }) {
-  return (
-    <div className="flex gap-4 text-sm">
-      <dt className="w-20 shrink-0 text-muted-foreground">{term}</dt>
-      <dd className="break-words text-foreground">{value}</dd>
-    </div>
-  );
 }
 
 /**

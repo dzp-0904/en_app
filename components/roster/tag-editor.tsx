@@ -33,7 +33,25 @@ import { MAX_TAG_LENGTH, MAX_TAGS } from "@/lib/standing";
  * purpose. These two columns carry no database constraint at all — no length,
  * no count, no vocabulary — so `readTags` is the only real enforcement and this
  * is only the courtesy of not letting a teacher type something that will bounce.
+ *
+ * `tone` is presentation and nothing else. The Figma's student profile writes
+ * strengths as green chips and areas to improve as orange ones — the same two
+ * tinted pairs `Badge` carries — so that the two lists can be told apart at a
+ * glance rather than only by the heading above them. The tints are the
+ * accessible `--green-dark` / `--orange-dark` foregrounds, not the Figma's own
+ * #3BA876 and #E8834A, for the reason `badge.tsx` sets out at length. `neutral`
+ * keeps the hairline chip the editor shipped with, so no existing caller
+ * changes appearance by upgrading.
+ *
+ * The colour is never the only signal: each list has a visible legend, and the
+ * remove button carries the tag's own name.
  */
+const CHIP = {
+  neutral: "border border-input bg-background text-foreground",
+  green: "bg-green-light text-green-dark",
+  orange: "bg-orange-light text-orange-dark",
+} as const;
+
 export function TagEditor({
   label,
   hint,
@@ -42,6 +60,7 @@ export function TagEditor({
   saved,
   empty,
   listId,
+  tone = "neutral",
 }: {
   label: string;
   hint: string;
@@ -52,6 +71,8 @@ export function TagEditor({
   saved: readonly string[];
   empty: string;
   listId: string;
+  /** Chip tint. Presentation only — see the note above. */
+  tone?: keyof typeof CHIP;
 }) {
   const [tags, setTags] = useState<string[]>([...saved]);
   const [draft, setDraft] = useState("");
@@ -92,21 +113,21 @@ export function TagEditor({
           {tags.map((tag) => (
             <li
               key={tag}
-              className="flex min-w-0 items-center gap-1 rounded-full border border-input bg-background py-1 pr-1 pl-2.5"
+              className={`flex min-w-0 items-center gap-1 rounded-full py-1 pr-1 pl-2.5 ${CHIP[tone]}`}
             >
               {/* `min-w-0` on the span as well as the row: a flex item defaults to
                   `min-width: auto`, which refuses to shrink below its content's
                   longest unbreakable run, and `break-words` only breaks a box
                   that is already constrained. Without it a single long token
                   widens the card past the viewport at 390px. */}
-              <span className="min-w-0 text-xs break-words text-foreground">
+              <span className="min-w-0 text-xs font-medium break-words">
                 {tag}
               </span>
               <button
                 type="button"
                 onClick={() => setTags(tags.filter((held) => held !== tag))}
                 aria-label={`Remove ${tag}`}
-                className="rounded-full px-1 text-xs leading-none text-muted-foreground hover:text-foreground"
+                className="rounded-full px-1 text-xs leading-none opacity-70 hover:opacity-100"
               >
                 &times;
               </button>

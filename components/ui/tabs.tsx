@@ -33,6 +33,25 @@ import { cn } from "@/lib/utils";
  * The unselected item is `--muted-foreground`, not the Figma's #8A8FA8: at 14px
  * that grey is 2.9:1 on the group's own ground, below the AA floor. This is the
  * substitution `globals.css` already documents, not a new one.
+ *
+ * PREFETCH. Links to a server-rendered view cost a round trip, and until the
+ * payload lands React holds the page it already has — so a tab click showed
+ * nothing at all for the whole wait. Measured on the production build against
+ * the hosted Supabase project, the six Class Detail transitions took 635–1068ms
+ * from click to any pixel changing, with first paint and final render landing
+ * in the same frame: no pending state, no partial view, nothing but a pause.
+ *
+ * `prefetch` asks Next.js to fetch the sibling views in the background while
+ * the current one is being read, so the click is served from the router cache.
+ * The same six transitions then measured 5–20ms. It is opt-in rather than
+ * always on because it is a trade: every tab in the group is rendered on the
+ * server whether or not it is opened, which is worth it for three views of one
+ * class a teacher moves between constantly, and would not be for a group whose
+ * views are expensive or rarely visited.
+ *
+ * Nothing about the request changes — same route, same session cookie, same
+ * server-side ownership check, same RLS. A prefetch can only return what a
+ * click a moment later would have returned.
  */
 
 export type TabItem = {
@@ -60,6 +79,7 @@ function Tabs({
   items,
   variant = "surface",
   label,
+  prefetch = false,
   className,
   ...props
 }: Omit<React.ComponentProps<"nav">, "children"> & {
@@ -67,6 +87,8 @@ function Tabs({
   variant?: keyof typeof GROUP;
   /** Names the group for assistive technology, e.g. "Class views". */
   label: string;
+  /** Fetch the unselected views in the background. See PREFETCH above. */
+  prefetch?: boolean;
 }) {
   return (
     <nav
@@ -80,6 +102,7 @@ function Tabs({
           <li key={item.href}>
             <Link
               href={item.href}
+              prefetch={prefetch}
               aria-current={item.current ? "page" : undefined}
               className={cn(
                 "block px-4 py-1.5 text-sm font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
