@@ -173,7 +173,7 @@ export default async function SessionPage({
           wraps between the date and the times instead of inside either. */}
       <PageHeader
         breadcrumb={[
-          { label: "Lớp học", href: "/teacher" },
+          { label: "Lớp học", href: "/teacher/classes" },
           { label: fields.className, href: `/teacher/${classId}` },
           { label: "Buổi học" },
         ]}
@@ -880,7 +880,7 @@ function Frame({
       {className ? null : (
         <PageHeader
           breadcrumb={[
-            { label: "Lớp học", href: "/teacher" },
+            { label: "Lớp học", href: "/teacher/classes" },
             { label: "Buổi học" },
           ]}
           title="Buổi học"

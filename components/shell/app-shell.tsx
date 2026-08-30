@@ -3,7 +3,15 @@ import type { ReactNode } from "react";
 import { signOut } from "@/app/auth/actions";
 import { LogoMark } from "@/components/brand/logo-mark";
 import { ClassesMark } from "@/components/icons/classes-mark";
-import { NavItem } from "@/components/shell/nav-item";
+import {
+  CalendarMark,
+  DashboardMark,
+  LessonLogsMark,
+  ReportsMark,
+  SettingsMark,
+  TuitionMark,
+} from "@/components/icons/nav-marks";
+import { Nav, type NavEntry } from "@/components/shell/nav";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -32,32 +40,58 @@ export type ShellRole = "teacher" | "student";
  * from the database. A student is never handed a teacher's row and cannot ask
  * for one: nothing here is derived from the request.
  *
- * Only routes that exist are listed. The reference direction also names a
- * "Dashboard" pointing at the teacher's landing page, and it is deliberately
- * absent: that landing page is `/teacher`, which is this same "Classes" entry,
- * and EduTrack has no dashboard — `app/teacher/page.tsx` says so in as many
- * words, and reports on nothing. Two labels for one destination would be one
- * button wearing two names, and the second name would be a claim about a
- * feature that does not exist.
+ * The teacher's seven sections are the Figma's `Layout.tsx` navigation, in its
+ * order. This list previously held one row, with a comment explaining that
+ * lessons, reports and tuition would each get a row "when they get a route" —
+ * because a greyed-out list of six things is still a promise. They have routes
+ * now, and every one of them reads a table that has existed since the schema
+ * was created: `class_sessions` behind the calendar, `lesson_logs` behind the
+ * lesson log, `monthly_reports` behind reports, `tuition_records` behind
+ * tuition, `profiles` behind settings. Nothing here links to a placeholder.
  *
- * Lessons, attendance, homework, reports and tuition all get a row here when
- * they get a route. Until then they are not listed at all, disabled or
- * otherwise, because a greyed-out list of six things is still a promise.
+ * "Tổng quan" and "Lớp học" are two destinations, not one label twice. The
+ * landing page is now the Figma's Dashboard — a greeting, four counts it can
+ * actually derive, and the classes list — and the full class list has moved to
+ * `/teacher/classes`, which is where the sidebar's second row goes. That is
+ * also why `fallback` exists: `/teacher/new` and `/teacher/<class id>` belong
+ * with "Lớp học" rather than with the dashboard they sit under.
+ *
+ * The student's navigation stays one row. The Figma has exactly one student
+ * screen and does not put it in this shell at all — it draws a top bar over a
+ * centred column — so there is no second student section to reproduce, and
+ * inventing one would be inventing a feature.
  */
 const NAV: Record<
   ShellRole,
   {
     heading: string;
-    items: { href: string; label: string }[];
+    root: string;
+    fallback?: string;
+    items: NavEntry[];
   }
 > = {
   teacher: {
     heading: "Dành cho giáo viên",
-    items: [{ href: "/teacher", label: "Lớp học" }],
+    root: "/teacher",
+    fallback: "/teacher/classes",
+    items: [
+      { href: "/teacher", label: "Tổng quan", icon: <DashboardMark /> },
+      { href: "/teacher/classes", label: "Lớp học", icon: <ClassesMark /> },
+      { href: "/teacher/calendar", label: "Lịch dạy", icon: <CalendarMark /> },
+      {
+        href: "/teacher/lesson-logs",
+        label: "Nhật ký buổi học",
+        icon: <LessonLogsMark />,
+      },
+      { href: "/teacher/reports", label: "Báo cáo", icon: <ReportsMark /> },
+      { href: "/teacher/tuition", label: "Học phí", icon: <TuitionMark /> },
+      { href: "/teacher/settings", label: "Cài đặt", icon: <SettingsMark /> },
+    ],
   },
   student: {
     heading: "Dành cho học viên",
-    items: [{ href: "/student", label: "Lớp học" }],
+    root: "/student",
+    items: [{ href: "/student", label: "Lớp học", icon: <ClassesMark /> }],
   },
 };
 
@@ -72,7 +106,7 @@ export function AppShell({
   email: string | null;
   children: ReactNode;
 }) {
-  const { heading, items } = NAV[role];
+  const { heading, root, fallback, items } = NAV[role];
 
   return (
     <div className="flex flex-1 flex-col lg:flex-row">
@@ -81,7 +115,10 @@ export function AppShell({
           // Narrow: a bar across the top. A drawer would be a lot of machinery
           // to hide a list this short, and the repository has no dialog
           // primitive to build one from. The brand and the sections share the
-          // first line; the account block wraps onto the second.
+          // first line; the account block wraps onto the second. Seven rows
+          // wrap onto as many lines as they need rather than scrolling
+          // sideways — `flex-wrap` on the list is what keeps the page itself
+          // from ever gaining a horizontal scrollbar at 320px.
           "flex shrink-0 flex-wrap items-center gap-x-4 gap-y-3 border-b border-border bg-card px-4 py-3",
           // Wide: a column beside the page rather than over it — `sticky` and
           // `self-start` so it stays put as the page scrolls without being
@@ -91,25 +128,14 @@ export function AppShell({
       >
         <LogoMark size="sm" className="mr-auto lg:mr-0" />
 
-        <nav aria-label="Điều hướng chính" className="lg:mt-9">
-          {/* The heading is the sidebar saying which product you are in. On the
-              top bar there is no column for it to head, so it is dropped
-              rather than squeezed in. */}
-          <p className="mb-2 hidden text-xs font-medium tracking-wide text-muted-foreground uppercase lg:block">
-            {heading}
-          </p>
-
-          <ul className="flex items-center gap-1 lg:flex-col lg:items-stretch">
-            {items.map((item) => (
-              <li key={item.href}>
-                <NavItem href={item.href}>
-                  <ClassesMark className="shrink-0" />
-                  {item.label}
-                </NavItem>
-              </li>
-            ))}
-          </ul>
-        </nav>
+        <Nav
+          entries={items}
+          root={root}
+          fallback={fallback}
+          label="Điều hướng chính"
+          heading={heading}
+          className="lg:mt-9 lg:w-full"
+        />
 
         <div className="flex w-full items-center justify-between gap-3 border-t border-border pt-3 lg:mt-auto lg:block lg:pt-5">
           {/* Name and address, both already loaded to decide the role. Nothing

@@ -547,6 +547,19 @@ export type StudentBands = {
   status: MemberStatus;
   targetBand: number | null;
   startOverall: number | null;
+  /**
+   * The baseline entry's per-skill bands.
+   *
+   * `v_member_current_band` has carried these since the view was written; this
+   * loader simply did not ask for them until the progress card needed to say
+   * how far each skill has moved. They come from the same `baseline` row
+   * `start_overall` does, so a skill can have a start and no current, or the
+   * reverse, and both are nulls rather than zeroes.
+   */
+  startReading: number | null;
+  startListening: number | null;
+  startWriting: number | null;
+  startSpeaking: number | null;
   currentOverall: number | null;
   currentReading: number | null;
   currentListening: number | null;
@@ -592,7 +605,7 @@ export async function loadStudentBands(
     supabase
       .from("v_member_current_band")
       .select(
-        "target_band, start_overall, current_overall, current_reading, current_listening, current_writing, current_speaking, current_recorded_on",
+        "target_band, start_overall, start_reading, start_listening, start_writing, start_speaking, current_overall, current_reading, current_listening, current_writing, current_speaking, current_recorded_on",
       )
       .eq("class_member_id", membershipId)
       .eq("class_id", classId)
@@ -627,6 +640,10 @@ export async function loadStudentBands(
     status: status.data?.status ?? "stable",
     targetBand: bands.data?.target_band ?? null,
     startOverall: bands.data?.start_overall ?? null,
+    startReading: bands.data?.start_reading ?? null,
+    startListening: bands.data?.start_listening ?? null,
+    startWriting: bands.data?.start_writing ?? null,
+    startSpeaking: bands.data?.start_speaking ?? null,
     currentOverall: bands.data?.current_overall ?? null,
     currentReading: bands.data?.current_reading ?? null,
     currentListening: bands.data?.current_listening ?? null,
@@ -665,6 +682,124 @@ export async function loadStudentScoreEntries(
 
   if (error) {
     console.error("[student] failed to load band entries", {
+      code: error.code,
+      message: error.message,
+    });
+    return null;
+  }
+
+  return (entries ?? []).map((entry) => ({
+    entryId: entry.id,
+    entryType: entry.entry_type,
+    overall: entry.overall,
+    reading: entry.reading,
+    listening: entry.listening,
+    writing: entry.writing,
+    speaking: entry.speaking,
+    note: entry.note,
+    recordedOn: entry.recorded_on,
+  }));
+}
+
+/**
+ * One piece of teacher feedback in this student's own history.
+ *
+ * The same `lesson_logs` rows the lesson page shows for a single lesson, read
+ * across the whole class in reverse chronological order — the Figma's "Recent
+ * Teacher Feedback" panel and its "My Learning History" tab are the same rows
+ * at two lengths.
+ *
+ * `mistakes` is deliberately absent. It is a list of the errors a teacher tagged
+ * on the day, written for the teacher's own analysis; a student's own page is
+ * not improved by a bare list of their mistakes with no lesson around it, and
+ * the note beside it is where the teacher put what they wanted the student to
+ * read.
+ */
+export type StudentFeedback = {
+  logId: string;
+  lessonDate: string;
+  skill: Skill;
+  performance: Performance;
+  topic: string;
+  note: string | null;
+};
+
+/**
+ * This student's own lesson feedback across one class.
+ *
+ * `lesson_logs_student_select` is `class_member_id = any(app.my_member_ids())`,
+ * so a student reaches their own rows and no one else's whatever this query
+ * asks for. Both ids are named anyway — the membership the caller has already
+ * proved through `loadStudentClass`, and the class it belongs to — so a
+ * mismatched pair matches no row rather than being fetched and compared after.
+ *
+ * `null` means the query failed, `[]` means the teacher has written nothing.
+ */
+export async function loadStudentFeedback(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+  membershipId: string,
+  limit: number,
+): Promise<StudentFeedback[] | null> {
+  const { data: logs, error } = await supabase
+    .from("lesson_logs")
+    .select("id, lesson_date, skill, performance, topic, note")
+    .eq("class_member_id", membershipId)
+    .eq("class_id", classId)
+    .order("lesson_date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("[student] failed to load lesson feedback", {
+      code: error.code,
+      message: error.message,
+    });
+    return null;
+  }
+
+  return (logs ?? []).map((log) => ({
+    logId: log.id,
+    lessonDate: log.lesson_date,
+    skill: log.skill,
+    performance: log.performance,
+    topic: log.topic,
+    note: log.note,
+  }));
+}
+
+/**
+ * Every band this student has been given in one class, oldest first.
+ *
+ * The Figma draws this as a recharts line chart with a per-skill filter. There
+ * is no charting library in this application and adding one for a single panel
+ * would be a dependency carried by every page in the bundle — so the same rows
+ * are rendered as a list, each entry showing what was recorded and when. The
+ * trajectory the chart drew is still readable; the pixels are not.
+ *
+ * `score_entries_student_select` restricts this to the caller's own memberships
+ * underneath. Oldest first because that is the direction progress is read in,
+ * and because `v_member_current_band` already names the newest one on its own.
+ *
+ * `null` means the query failed, `[]` means nothing has been recorded.
+ */
+export async function loadStudentScoreHistory(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+  membershipId: string,
+): Promise<StudentScoreEntry[] | null> {
+  const { data: entries, error } = await supabase
+    .from("score_entries")
+    .select(
+      "id, entry_type, overall, reading, listening, writing, speaking, note, recorded_on",
+    )
+    .eq("class_member_id", membershipId)
+    .eq("class_id", classId)
+    .order("recorded_on", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("[student] failed to load band history", {
       code: error.code,
       message: error.message,
     });

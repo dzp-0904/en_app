@@ -49,7 +49,7 @@ export default async function NewClassPage({ searchParams }: PageSearchParams) {
     <PageShell width="2xl">
       <PageHeader
         breadcrumb={[
-          { label: "Lớp học", href: "/teacher" },
+          { label: "Lớp học", href: "/teacher/classes" },
           { label: "Tạo lớp học" },
         ]}
         title="Tạo lớp học"

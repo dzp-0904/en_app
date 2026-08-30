@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageShell } from "@/components/ui/page-shell";
 import { loadUserState } from "@/lib/onboarding";
@@ -53,7 +54,14 @@ export default async function StudentPage() {
 
   return (
     <PageShell width="lg" align="center">
-      <PageHeader title={`Chào ${fullName}`} />
+      <PageHeader
+        title={`Chào ${fullName}`}
+        meta={
+          classes && classes.length > 0
+            ? [`${classes.length} lớp học`]
+            : undefined
+        }
+      />
 
       <h2 className="mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
         Lớp học của bạn
@@ -67,12 +75,10 @@ export default async function StudentPage() {
           Chúng tôi chưa tải được lớp học của bạn. Vui lòng tải lại trang.
         </Alert>
       ) : classes.length === 0 ? (
-        <Card>
-          <p className="text-sm text-muted-foreground">
-            Bạn chưa tham gia lớp học nào. Khi giáo viên gửi liên kết mời,
-            hãy mở liên kết đó để tham gia.
-          </p>
-        </Card>
+        <EmptyState
+          title="Bạn chưa tham gia lớp học nào"
+          description="Khi giáo viên gửi liên kết mời, hãy mở liên kết đó để tham gia."
+        />
       ) : (
         <ul className="space-y-3">
           {classes.map((entry) => (

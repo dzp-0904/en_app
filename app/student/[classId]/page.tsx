@@ -3,13 +3,20 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { BandProgress } from "@/components/student/band-progress";
 import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageShell } from "@/components/ui/page-shell";
 import { ATTENDANCE_LABELS } from "@/lib/attendance";
 import { LABELS, isOfferedCourseType } from "@/lib/course-type";
+import {
+  PERFORMANCE_LABELS,
+  SKILL_LABELS,
+  type Performance,
+} from "@/lib/lesson-log";
 import { loadUserState } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
 import {
@@ -17,14 +24,19 @@ import {
   formatBand,
   isBandScored,
   MEMBER_STATUS_LABELS,
+  SCORE_ENTRY_TYPE_LABELS,
 } from "@/lib/score";
 import {
   loadStudentBands,
   loadStudentClass,
+  loadStudentFeedback,
   loadStudentLessons,
+  loadStudentScoreHistory,
   type StudentBands,
   type StudentClassDetail,
+  type StudentFeedback,
   type StudentLesson,
+  type StudentScoreEntry,
 } from "@/lib/student";
 import { createClient } from "@/lib/supabase/server";
 import { formatZonedDate, formatZonedTime } from "@/lib/time";
@@ -58,6 +70,28 @@ const DATE = new Intl.DateTimeFormat("vi-VN", {
   year: "numeric",
   timeZone: "UTC",
 });
+
+/**
+ * How many pieces of teacher feedback the page shows.
+ *
+ * The Figma has two panels over the same rows — a "Recent Teacher Feedback"
+ * card showing two, and a "My Learning History" tab showing every one. There is
+ * one list here rather than two views of the same thing, long enough to be a
+ * history and short enough that a student on a phone reaches the lessons below
+ * it.
+ */
+const FEEDBACK_LIMIT = 12;
+
+/** The Figma's performance colours, in this application's `Badge` tones. */
+const PERFORMANCE_TONE: Record<
+  Performance,
+  "green" | "primary" | "orange" | "destructive"
+> = {
+  excellent: "green",
+  good: "primary",
+  developing: "orange",
+  needs_attention: "destructive",
+};
 
 /** `YYYY-MM-DD` read as a calendar date, not a moment in the viewer's zone. */
 /**
@@ -254,11 +288,23 @@ export default async function StudentClassPage({
   // answers to the other, so they go out together.
   const banded = isBandScored(detail.courseType);
 
-  const [lessons, bands] = await Promise.all([
+  const [lessons, bands, history, feedback] = await Promise.all([
     loadStudentLessons(supabase, detail.classId, detail.membershipId),
     banded
       ? loadStudentBands(supabase, detail.classId, detail.membershipId)
       : Promise.resolve(null),
+    banded
+      ? loadStudentScoreHistory(supabase, detail.classId, detail.membershipId)
+      : Promise.resolve(null),
+    // The Figma's "Recent Teacher Feedback" — this student's own `lesson_logs`
+    // rows, newest first. Not gated on `banded`: a teacher writes notes about
+    // any class, band-scored or not.
+    loadStudentFeedback(
+      supabase,
+      detail.classId,
+      detail.membershipId,
+      FEEDBACK_LIMIT,
+    ),
   ]);
 
   return (
@@ -334,23 +380,85 @@ export default async function StudentClassPage({
               </p>
             </Card>
           ) : (
+            <>
+              {/* The Figma's navy hero. The `dl` below keeps the facts it does
+                  not draw — the standing the views report, and the date of the
+                  most recent entry — because a picture of a band is not the
+                  same as being told when it was taken. */}
+              <BandProgress bands={bands} />
+
+              <Card className="mt-4">
+                <dl className="space-y-3">
+                  {progressFor(bands).map((fact) => (
+                    <div key={fact.term} className="flex gap-4 text-sm">
+                      <dt className="w-24 shrink-0 text-muted-foreground">
+                        {fact.term}
+                      </dt>
+                      <dd className="break-words text-foreground">
+                        {fact.value}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </Card>
+            </>
+          )}
+
+          <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            Lịch sử điểm
+          </h2>
+
+          {history === null ? (
+            <Alert>
+              Chúng tôi chưa tải được lịch sử điểm của bạn. Vui lòng tải lại
+              trang.
+            </Alert>
+          ) : history.length === 0 ? (
             <Card>
-              <dl className="space-y-3">
-                {progressFor(bands).map((fact) => (
-                  <div key={fact.term} className="flex gap-4 text-sm">
-                    <dt className="w-24 shrink-0 text-muted-foreground">
-                      {fact.term}
-                    </dt>
-                    <dd className="break-words text-foreground">
-                      {fact.value}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
+              <p className="text-sm text-muted-foreground">
+                Chưa ghi nhận điểm nào.
+              </p>
             </Card>
+          ) : (
+            <ul className="space-y-3">
+              {history.map((entry) => (
+                <li key={entry.entryId}>
+                  <Card>
+                    <ScoreEntry entry={entry} />
+                  </Card>
+                </li>
+              ))}
+            </ul>
           )}
         </>
       ) : null}
+
+      <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        Nhận xét của giáo viên
+      </h2>
+
+      {feedback === null ? (
+        <Alert>
+          Chúng tôi chưa tải được nhận xét của giáo viên. Vui lòng tải lại
+          trang.
+        </Alert>
+      ) : feedback.length === 0 ? (
+        <Card>
+          <p className="text-sm text-muted-foreground">
+            Chưa có nhận xét nào.
+          </p>
+        </Card>
+      ) : (
+        <ul className="space-y-3">
+          {feedback.map((entry) => (
+            <li key={entry.logId}>
+              <Card>
+                <Feedback entry={entry} />
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
         Buổi học
@@ -468,5 +576,109 @@ function Frame({ children }: { children: ReactNode }) {
     <PageShell width="lg" align="center">
       {children}
     </PageShell>
+  );
+}
+
+/**
+ * One band entry in the history — what was recorded, and when.
+ *
+ * `score_entries` is append-only and every row is a measurement the teacher
+ * made on a day, so this prints the row rather than interpreting it: the entry
+ * type as the teacher chose it, every skill that carries a band, and the note
+ * if there is one. Nothing is compared to the entry before it — the hero above
+ * owns the only comparison this page makes, and it makes it from the view.
+ *
+ * A skill with no band is left out rather than shown as a dash: an entry that
+ * recorded only Writing is a real thing a teacher does, and four empty cells
+ * would suggest four bad results.
+ */
+function ScoreEntry({ entry }: { entry: StudentScoreEntry }) {
+  const skills = (
+    [
+      ["reading", entry.reading],
+      ["listening", entry.listening],
+      ["writing", entry.writing],
+      ["speaking", entry.speaking],
+    ] as const
+  )
+    .map(([skill, band]) => {
+      const shown = formatBand(band);
+      return shown === null ? null : `${BAND_FIELD_LABELS[skill]} ${shown}`;
+    })
+    .filter((part): part is string => part !== null);
+
+  const overall = formatBand(entry.overall);
+
+  return (
+    <>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0 grow basis-48">
+          <p className="text-xs text-muted-foreground">
+            {DATE.format(asDate(entry.recordedOn))}
+          </p>
+
+          {overall === null ? null : (
+            <p className="mt-1 text-lg font-semibold text-foreground">
+              {`Band ${overall}`}
+            </p>
+          )}
+        </div>
+
+        <Badge tone="neutral" className="shrink-0">
+          {SCORE_ENTRY_TYPE_LABELS[entry.entryType]}
+        </Badge>
+      </div>
+
+      {skills.length > 0 ? (
+        <p className="mt-2 text-sm break-words text-muted-foreground">
+          {skills.join(" · ")}
+        </p>
+      ) : null}
+
+      {entry.note ? (
+        <p className="mt-3 rounded-lg bg-background p-3 text-sm break-words whitespace-pre-wrap text-muted-foreground italic">
+          {entry.note}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * One lesson note the teacher wrote about this student.
+ *
+ * Read-only, like everything else on this page. `lesson_logs` grants the
+ * student SELECT through `lesson_logs_student_select` and nothing more, so
+ * there is no control here that could write one even if the page offered it.
+ *
+ * `lesson_date` is a `date` — a calendar square the teacher already resolved
+ * onto the class clock — so it is read at UTC midnight through the same `DATE`
+ * formatter the class dates use, and never reinterpreted in the reader's zone.
+ */
+function Feedback({ entry }: { entry: StudentFeedback }) {
+  return (
+    <>
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0 grow basis-48">
+          <p className="text-xs text-muted-foreground">
+            {`${DATE.format(asDate(entry.lessonDate))} · ${SKILL_LABELS[entry.skill]}`}
+          </p>
+
+          <p className="mt-1 font-medium break-words text-foreground">
+            {entry.topic}
+          </p>
+        </div>
+
+        <Badge tone={PERFORMANCE_TONE[entry.performance]} className="shrink-0">
+          {PERFORMANCE_LABELS[entry.performance]}
+        </Badge>
+      </div>
+
+      {entry.note ? (
+        <p className="mt-3 rounded-lg bg-background p-3 text-sm break-words whitespace-pre-wrap text-muted-foreground italic">
+          {entry.note}
+        </p>
+      ) : null}
+    </>
   );
 }

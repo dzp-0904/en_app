@@ -404,7 +404,7 @@ export default async function TeacherClassPage({
           // the place this page came from is the class list, and that is what
           // the crumb is named after. It also carries the page's old "← Back to
           // classes" link, which the trail replaces rather than drops.
-          { label: "Lớp học", href: "/teacher" },
+          { label: "Lớp học", href: "/teacher/classes" },
           { label: detail.className },
         ]}
         title={detail.className}
@@ -1879,7 +1879,13 @@ function Frame({ children }: { children: ReactNode }) {
     <PageShell width="5xl">
       <Breadcrumb
         className="mb-6"
-        items={[{ label: "Lớp học", href: "/teacher" }, { label: "Lớp học" }]}
+        items={[
+          { label: "Lớp học", href: "/teacher/classes" },
+          // The class's own name is what the failed load would have supplied,
+          // so the current page names what it is rather than repeating the
+          // crumb above it.
+          { label: "Chi tiết lớp học" },
+        ]}
       />
       {children}
     </PageShell>

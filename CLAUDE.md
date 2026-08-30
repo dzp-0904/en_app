@@ -5,7 +5,7 @@ Read it in full before starting any milestone. Do not ask the user for anything
 that is already answered here, in the repository, in git history, or in the
 current milestone prompt.
 
-Last updated: 2026-08-30, after M21.
+Last updated: 2026-08-30, after M22.
 
 ---
 
@@ -95,10 +95,12 @@ SMTP secrets into the Docker image.
 ### Client components — exactly five
 
 Everything else is a Server Component. Do **not** add `"use client"` without a
-concrete interaction reason.
+concrete interaction reason. M22 replaced `components/shell/nav-item.tsx` with
+`components/shell/nav.tsx` — one component marking the active row for seven nav
+entries instead of one per row — so the count did not change.
 
 ```
-components/shell/nav-item.tsx
+components/shell/nav.tsx
 components/roster/tag-editor.tsx
 components/auth/submit-button.tsx
 components/onboarding/copy-field.tsx
@@ -140,9 +142,10 @@ Rules:
 
 ### Shared UI primitives (M17)
 
-`components/ui/`: alert, avatar, badge, breadcrumb, button, card, filter-pills,
-input, label, page-header, page-shell, progress-bar, select, stat-card, table,
-tabs, textarea.
+`components/ui/`: alert, avatar, badge, breadcrumb, button, card, empty-state,
+filter-pills, input, label, page-header, page-shell, progress-bar, section-heading,
+select, stat-card, table, tabs, textarea. **Nineteen** — M22 added `empty-state`
+and `section-heading`.
 
 Conventions: `data-slot` attributes, `cn()` from `@/lib/utils`, `cva` for
 variants, `React.ComponentProps<"x">` typing, named exports at the bottom, long
@@ -453,7 +456,9 @@ expose teacher functionality. Preserve the existing redirects:
 - A student must only ever see their own memberships. Never query memberships by
   a client-supplied `student_id`.
 - Do not allow arbitrary users to promote themselves to teacher.
-- `/` is **not** a dashboard and must not be called one.
+- `/` is **not** a dashboard and must not be called one. The **teacher
+  dashboard is `/teacher`**, added in M22; the full class list moved to
+  `/teacher/classes`. Those are two destinations, not one label twice.
 
 ---
 
@@ -680,16 +685,120 @@ known gaps.
     `ReadMcpResourceTool` on the returned `file://figma/make/source/...` URIs is
     the working route, and the Make source *is* the design.
 
+### M22 — Complete Figma UI reconstruction
+- **Audited** (Phase 1, before any edit): the whole Figma Make source, not one
+  node — `Layout.tsx`, the teacher Dashboard, Classes, ClassDetail, CreateClass,
+  Calendar, LessonLogs, Reports, Tuition, Settings, StudentDetail, and the
+  student Dashboard, plus authentication. The screen inventory was built first,
+  then every screen classified A/B/C/D.
+- **The brief's premise about a missing backend was wrong, and the schema won**
+  (decision **B**). `lesson_logs`, `class_sessions`, `monthly_reports`,
+  `tuition_records` and `profiles` have all existed since the foundation commit,
+  with constraints, teacher-scoped RLS policies and grants to `authenticated`.
+  So Calendar, Lesson Logs and Settings → **A**; Reports and Tuition → **A** for
+  read, **B** for write (no compose/record UI was invented). **No category D,
+  and therefore zero migrations, zero RLS/RPC/grant/schema changes.**
+- **Implemented** — 12 files changed, 17 new, 0 new dependencies:
+  - **Shared UI:** `components/ui/empty-state.tsx` and
+    `components/ui/section-heading.tsx` (the primitives count is now 19);
+    `stat-card.tsx` gained the Dashboard's optional tinted `tone` square;
+    `components/shell/nav.tsx` replaced `nav-item.tsx` (still five client
+    components); `components/icons/nav-marks.tsx` draws the six new nav marks.
+  - **Shell:** `app-shell.tsx` now renders the Figma's seven teacher sections —
+    Tổng quan, Lớp học, Lịch dạy, Nhật ký buổi học, Báo cáo, Học phí, Cài đặt.
+    `fallback` is why `/teacher/new` and `/teacher/<id>` mark **Lớp học** active
+    rather than the dashboard they sit under. The student's nav stays one row:
+    the Figma has exactly one student screen, and inventing a second section
+    would be inventing a feature.
+  - **Teacher:** `/teacher` became the Figma Dashboard (greeting, four derived
+    counts, class list, "Học viên cần chú ý"); the class list moved to
+    `/teacher/classes`; new `/teacher/calendar` (week strip over
+    `class_sessions`), `/teacher/lesson-logs` (real `lesson_logs` with class and
+    skill filter pills), `/teacher/reports`, `/teacher/tuition`, and
+    `/teacher/settings` + `actions.ts` (`updateProfile` over `profiles`).
+  - **Student:** `components/student/band-progress.tsx` — the Figma's navy hero,
+    a **server** component; `/student/[classId]` gained "Lịch sử điểm" and
+    "Nhận xét của giáo viên"; `/student` gained an `EmptyState` and a count.
+  - **`lib/`:** new `dashboard.ts`, `calendar.ts`, `lesson-logs.ts`,
+    `reports.ts`, `tuition.ts`; `student.ts` gained the four baseline skill
+    columns (`v_member_current_band` already carried them — only the select
+    string was short), `loadStudentFeedback` and `loadStudentScoreHistory`.
+  - **Breadcrumbs repointed:** seven `{ label: "Lớp học", href: "/teacher" }`
+    crumbs across five files now point at `/teacher/classes`, because `/teacher`
+    is the dashboard; the class-detail error frame's duplicated crumb was fixed.
+- **Deliberate deviations from the Figma, all recorded in JSDoc:**
+  - The Figma's student "Score Over Time" is a **recharts** LineChart. It is
+    rendered here as an oldest-first list of real `score_entries` — a charting
+    dependency is decision **E**, and §21 asks to keep the server-rendered
+    architecture.
+  - Settings' "Change password" and "Two-factor authentication" have no handler
+    in the Figma and no backend here, so they are **non-interactive rows marked
+    "Chưa khả dụng" / "Chưa bật"**, not dead buttons.
+  - The Dashboard's "Recent Progress" feed and Tuition's "Send reminder" are
+    Figma mock data with no query behind them; neither was fabricated.
+  - `share_token_hash` is **never** selected by `lib/reports.ts`.
+- **Verified** against the production build with CDP:
+  - **Responsive:** 15 teacher pages × 6 widths (1280/1024/768/390/360/320),
+    3 student pages × 6 and 6 anonymous pages × 6 — **144 page-width
+    combinations, zero page-level horizontal scroll.** Clipping only in the
+    known by-design cases (`sr-only`, the invite `<code>`).
+  - **Accessibility:** every page exactly one `h1`; zero nameless controls; zero
+    unlabelled inputs; zero duplicate ids; zero exposed avatars. Every
+    `aria-current="page"` sits in its own labelled `nav` — main navigation,
+    breadcrumb, tabs, filter groups — one per landmark.
+  - **No-JS** (`Emulation.setScriptExecutionDisabled`) on all 14 teacher and 3
+    student pages: render, headings, breadcrumb links, forms. The teacher lesson
+    page still emits its **four** attendance submit buttons.
+  - **M16/M19 behaviour:** `?student=` opens the panel under all four filter
+    values, Close preserves each one plus the roster anchor, stale and malformed
+    `?student=` still give the Vietnamese alert rather than a 404.
+  - **Security:** the student account is redirected to `/student` from all eight
+    teacher routes including the five new ones; a class the account is not in is
+    `notFound()` for both roles; foreign-class 404 parity intact.
+  - **Settings Server Action exercised end-to-end** by submitting the teacher's
+    **identical** existing values — success notice rendered, and both stored
+    values re-read unchanged — plus the server-side refusal path (blank name,
+    `required` removed client-side → "Vui lòng nhập tên mà học viên sẽ nhìn
+    thấy.", nothing written).
+  - **English-string sweep** of rendered text on 18 pages: the only English is
+    the teacher's own note text, which is user data and must not be translated.
+  - **Typography:** Lora appears in exactly three places — the landing headline,
+    the login pull quote, the signup headline. Decision **N** intact.
+  - **Tab transitions** re-measured with a `MutationObserver` on the first
+    router DOM commit: **3–7 ms** across 3 runs × 6 hops. That is a *different
+    instrument* from M19/M21's rAF-based 11–13 ms and is **not** comparable
+    like-for-like; the rAF instrument on this build returned 13–32 ms, which is
+    frame-quantised at 16.7 ms rather than a regression.
+  - `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ · **25 routes**
+    (24 `page.tsx` + `app/auth/callback/route.ts`), no debug or preview route.
+- **Limitations:**
+  - The attendance and score **write** paths were again not exercised — the only
+    seeded class is real production data and the standing instruction forbids
+    writing test data into it. `status-buttons.tsx` and every
+    `app/teacher/[classId]/actions.ts` path are untouched by M22.
+  - "A student cannot see a classmate's data" could not be exercised
+    **empirically**: the one class has one member, and creating a second is a
+    production write. It rests on `class_members_student_select` and on the
+    student loaders taking `membershipId` from the session, never from the URL.
+  - `monthly_reports` and `tuition_records` are empty in production, so both
+    pages were seen only in their empty state. Their populated branches are
+    code-reviewed, not screenshotted.
+  - Report **compose** and tuition **record** flows were not built: the brief
+    asked to reproduce UI structure first and not to auto-implement backend.
+  - A temporary `app/m22-preview` route was used to see the band hero without
+    writing `score_entries` into `IELTS Evening Group B`. It was deleted, its
+    absence confirmed, and the tree rebuilt before the route count was read.
+
 ## 14. Current project state (verified 2026-08-30)
 
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `24ed32b` — "feat: polish Figma UI fidelity" |
-| `origin/main` | `24ed32b` — **in sync, M21 is committed and pushed** |
+| HEAD | `__HEAD__` — "feat: reconstruct the full Figma UI" |
+| `origin/main` | `24ed32b` — **M22 is committed locally and NOT pushed** |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
 | Working tree | **clean** |
-| Routes | **20** (19 `page.tsx` + `app/auth/callback/route.ts`) |
+| Routes | **25** (24 `page.tsx` + `app/auth/callback/route.ts`) |
 | Migrations | 15, unchanged since the database foundation commit |
 | RLS | enabled + FORCEd on 13 tables |
 | Gates | `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ |
@@ -707,7 +816,13 @@ known gaps.
 /onboarding/teaching-type                      .../teaching-type/page.tsx
 /onboarding/class                              .../class/page.tsx
 /onboarding/invite                             .../invite/page.tsx
-/teacher                                       app/teacher/page.tsx
+/teacher                                       app/teacher/page.tsx                  (dashboard)
+/teacher/classes                               app/teacher/classes/page.tsx
+/teacher/calendar                              app/teacher/calendar/page.tsx         (?week=YYYY-MM-DD)
+/teacher/lesson-logs                           app/teacher/lesson-logs/page.tsx      (?class= &skill=)
+/teacher/reports                               app/teacher/reports/page.tsx
+/teacher/tuition                               app/teacher/tuition/page.tsx
+/teacher/settings                              app/teacher/settings/page.tsx
 /teacher/new                                   app/teacher/new/page.tsx
 /teacher/[classId]                             app/teacher/[classId]/page.tsx        (tabs: ?tab=lessons|info)
 /teacher/[classId]/edit                        .../edit/page.tsx
@@ -719,7 +834,8 @@ known gaps.
 ```
 
 Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
-`app/join/[code]/actions.ts`, `app/teacher/[classId]/actions.ts`.
+`app/join/[code]/actions.ts`, `app/teacher/[classId]/actions.ts`,
+`app/teacher/settings/actions.ts`.
 
 ---
 
@@ -750,6 +866,15 @@ Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
 - **N.** Application titles are Public Sans `text-2xl font-semibold` via
   `PageHeader`. Lora is the marketing voice and belongs only to `app/page.tsx`
   and `components/auth/brand-panel.tsx`.
+
+- **O.** `/teacher` is the **dashboard** and `/teacher/classes` is the class
+  list. Any crumb or link meaning "the classes" points at `/teacher/classes`.
+- **P.** A navigation row exists only when its route reads a real table. A
+  feature with no query behind it is not listed, and a control with no
+  backend is rendered as a statement of what is unavailable — never as a
+  button that does nothing.
+- **Q.** No charting library. The Figma's recharts graphs are rendered as
+  lists and rails over the same real rows (decision **E**).
 
 Additional standing constraints from the user, still in force:
 
