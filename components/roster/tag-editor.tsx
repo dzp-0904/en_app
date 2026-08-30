@@ -94,7 +94,14 @@ export function TagEditor({
               key={tag}
               className="flex min-w-0 items-center gap-1 rounded-full border border-input bg-background py-1 pr-1 pl-2.5"
             >
-              <span className="text-xs break-words text-foreground">{tag}</span>
+              {/* `min-w-0` on the span as well as the row: a flex item defaults to
+                  `min-width: auto`, which refuses to shrink below its content's
+                  longest unbreakable run, and `break-words` only breaks a box
+                  that is already constrained. Without it a single long token
+                  widens the card past the viewport at 390px. */}
+              <span className="min-w-0 text-xs break-words text-foreground">
+                {tag}
+              </span>
               <button
                 type="button"
                 onClick={() => setTags(tags.filter((held) => held !== tag))}

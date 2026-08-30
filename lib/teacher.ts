@@ -4,6 +4,11 @@ import type { AttendanceStatus } from "@/lib/attendance";
 import type { CourseType } from "@/lib/course-type";
 import type { Performance, Skill } from "@/lib/lesson-log";
 import type { MemberStatus, ScoreEntryType } from "@/lib/score";
+import {
+  loadStudentBands,
+  type StudentBands,
+  type StudentScoreEntry,
+} from "@/lib/student";
 import type { createClient } from "@/lib/supabase/server";
 
 /**
@@ -894,4 +899,243 @@ export async function loadScoreEntriesOn(
     recordedOn: entry.recorded_on,
     createdAt: entry.created_at,
   }));
+}
+
+/**
+ * One session this student was actually marked at.
+ *
+ * A row of `session_attendance` with its session's own clock reading beside it.
+ * Sessions with no mark are deliberately absent rather than listed as "Not
+ * recorded": the four statuses are the vocabulary here, and manufacturing a
+ * fifth for every unmarked lesson would bury a term's real marks under the
+ * lessons nobody has got to yet. The class page's lesson list is where every
+ * session appears, marked or not.
+ *
+ * `startsAt` and `endsAt` are raw instants, unformatted for the same reason
+ * `ClassSession`'s are: only `classes.timezone` says which clock to read them
+ * on, and `lib/time.ts` does that at the point of display.
+ */
+export type OverviewAttendance = {
+  sessionId: string;
+  startsAt: string;
+  endsAt: string;
+  sessionTitle: string | null;
+  status: AttendanceStatus;
+};
+
+/**
+ * One lesson note about this student.
+ *
+ * `LessonNote` is the session page's shape and carries the student's name on
+ * every row, because that page lists a whole class's notes. Every row here is
+ * about one person who is named once above the list, so the name is left out
+ * rather than repeated. `lessonDate` is `lesson_logs.lesson_date`, a bare
+ * `date` already derived on the class's clock when the note was written.
+ */
+export type OverviewNote = {
+  noteId: string;
+  lessonDate: string;
+  skill: Skill;
+  performance: Performance;
+  topic: string;
+  note: string | null;
+};
+
+/**
+ * Everything already known about one student in one class, gathered.
+ *
+ * Nothing here is new information. `bands` is the two progress views, `strengths`
+ * and `focusAreas` are the two `class_members` columns, and the three lists are
+ * the rows of `session_attendance`, `score_entries` and `lesson_logs` that name
+ * this membership. The overview computes nothing: every derived value —  current
+ * band, starting band, performance status — arrives already derived, from the
+ * views that own those definitions.
+ *
+ * `name` and `email` are read here rather than taken from the caller's roster
+ * so that what the panel displays comes from the same row that authorised it.
+ */
+export type StudentOverview = {
+  membershipId: string;
+  name: string | null;
+  email: string | null;
+  joinedAt: string | null;
+  strengths: string[];
+  focusAreas: string[];
+  bands: StudentBands;
+  attendance: OverviewAttendance[];
+  scores: StudentScoreEntry[];
+  notes: OverviewNote[];
+};
+
+export type StudentOverviewResult =
+  | { kind: "ok"; overview: StudentOverview }
+  | { kind: "not-found" }
+  | { kind: "error" };
+
+/**
+ * One student's existing facts, for a teacher who owns the class.
+ *
+ * ## What authorises this
+ *
+ * The caller has already proved the class: every page reaching this has been
+ * through `loadTeacherClass`, which filters by the authenticated teacher's id
+ * and reports another teacher's class as one that does not exist. `membershipId`
+ * is the one value here a browser chooses, and it never selects a row on its
+ * own — the first statement below names all four conditions in one WHERE clause:
+ *
+ *   id = membershipId AND class_id = classId
+ *   AND join_status = 'joined' AND removed_at IS NULL
+ *
+ * so a membership belonging to another class — including another of this
+ * teacher's own — a removed one, and an invitation that was never claimed all
+ * match nothing and are reported identically as `not-found`. The four reads that
+ * follow are reached only after that row exists, and each is scoped to the same
+ * two ids again rather than trusting the first check to have settled it.
+ * Underneath, `class_members_teacher_all`, `session_attendance_teacher_all`,
+ * `score_entries_teacher_all` and `lesson_logs_teacher_all` all resolve through
+ * `app.my_class_ids()`, so another teacher's rows are not filtered out of these
+ * results — they never arrive.
+ *
+ * ## Cost
+ *
+ * One statement to authorise, then four in parallel: the two progress views
+ * (through `loadStudentBands`, which already asks exactly this pair scoped to
+ * exactly these two ids), this student's marks with their sessions embedded,
+ * this student's entries, and this student's notes. Nothing is per session, per
+ * entry or per note, so a student with a term of history costs the same five
+ * round trips as one with none. Nothing runs at all unless a student is
+ * selected.
+ *
+ * `not-found` and `error` stay separate, as everywhere else in this module: a
+ * query that did not come back is not entitled to claim a student is gone.
+ */
+export async function loadStudentOverview(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+  membershipId: string,
+): Promise<StudentOverviewResult> {
+  // A segment that cannot name a membership is a stale link, not a lookup.
+  if (!isUuid(membershipId)) return { kind: "not-found" };
+
+  const { data: member, error: memberError } = await supabase
+    .from("class_members")
+    .select(
+      "id, joined_at, strengths, focus_areas, invited_name, invited_email, profiles!class_members_student_id_fkey(full_name, email)",
+    )
+    .eq("id", membershipId)
+    .eq("class_id", classId)
+    // The state check is part of the filter rather than something read back and
+    // asserted, so an invitation or a removed membership is not fetched and then
+    // rejected — it is never returned.
+    .eq("join_status", "joined")
+    .is("removed_at", null)
+    .maybeSingle();
+
+  if (memberError) {
+    logDbError("class_members.select(overview)", memberError);
+    return { kind: "error" };
+  }
+
+  if (!member) return { kind: "not-found" };
+
+  const [bands, marks, scores, logs] = await Promise.all([
+    // The two progress views, already scoped to this membership and this class.
+    // Restating them here would be a second definition of "current band" for
+    // the two sides of the application to disagree over.
+    loadStudentBands(supabase, classId, membershipId),
+    supabase
+      .from("session_attendance")
+      .select(
+        "session_id, status, class_sessions!session_attendance_session_fk(starts_at, ends_at, title)",
+      )
+      .eq("class_id", classId)
+      .eq("class_member_id", membershipId),
+    supabase
+      .from("score_entries")
+      .select(
+        "id, entry_type, overall, reading, listening, writing, speaking, note, recorded_on",
+      )
+      .eq("class_id", classId)
+      .eq("class_member_id", membershipId)
+      // Newest first: this is a history being reviewed, not a form being filled.
+      // `created_at` breaks the tie the same way `v_member_current_band` does,
+      // so "most recent" means the same thing in both places.
+      .order("recorded_on", { ascending: false })
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("lesson_logs")
+      .select("id, lesson_date, skill, performance, topic, note")
+      .eq("class_id", classId)
+      .eq("class_member_id", membershipId)
+      .order("lesson_date", { ascending: false })
+      .order("created_at", { ascending: false }),
+  ]);
+
+  if (bands === null) return { kind: "error" };
+
+  if (marks.error) {
+    logDbError("session_attendance.select(overview)", marks.error);
+    return { kind: "error" };
+  }
+  if (scores.error) {
+    logDbError("score_entries.select(overview)", scores.error);
+    return { kind: "error" };
+  }
+  if (logs.error) {
+    logDbError("lesson_logs.select(overview)", logs.error);
+    return { kind: "error" };
+  }
+
+  // Sorted here rather than in the statement because the key lives on the
+  // embedded session. This orders one student's own marks — all of which the
+  // query already returned — and is not standing in for a filter.
+  const attendance: OverviewAttendance[] = (marks.data ?? [])
+    .flatMap((mark) =>
+      mark.class_sessions
+        ? [
+            {
+              sessionId: mark.session_id,
+              startsAt: mark.class_sessions.starts_at,
+              endsAt: mark.class_sessions.ends_at,
+              sessionTitle: mark.class_sessions.title,
+              status: mark.status,
+            },
+          ]
+        : [],
+    )
+    .sort((a, b) => b.startsAt.localeCompare(a.startsAt));
+
+  return {
+    kind: "ok",
+    overview: {
+      membershipId: member.id,
+      // The profile wins over the name the teacher typed, as on the roster.
+      name: member.profiles?.full_name ?? member.invited_name,
+      email: member.profiles?.email ?? member.invited_email,
+      joinedAt: member.joined_at,
+      strengths: member.strengths,
+      focusAreas: member.focus_areas,
+      bands,
+      attendance,
+      scores: (scores.data ?? []).map((entry) => ({
+        entryId: entry.id,
+        entryType: entry.entry_type,
+        overall: entry.overall,
+        reading: entry.reading,
+        listening: entry.listening,
+        writing: entry.writing,
+        speaking: entry.speaking,
+        note: entry.note,
+        recordedOn: entry.recorded_on,
+      })),
+      notes: (logs.data ?? []).map((log) => ({
+        noteId: log.id,
+        lessonDate: log.lesson_date,
+        skill: log.skill,
+        performance: log.performance,
+        topic: log.topic,
+        note: log.note,
+      })),
+    },
+  };
 }

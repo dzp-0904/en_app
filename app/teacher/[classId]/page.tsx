@@ -18,15 +18,27 @@ import { joinUrl } from "@/lib/site-url";
 import { createClient } from "@/lib/supabase/server";
 import {
   loadClassSessions,
+  loadStudentOverview,
   loadTeacherClass,
   type ClassSession,
   type RosterEntry,
+  type StudentOverview,
   type TeacherClassDetail,
 } from "@/lib/teacher";
 import { formatZonedDate, formatZonedTime } from "@/lib/time";
 
 import { TagEditor } from "@/components/roster/tag-editor";
-import { BAND_VALUES, formatBand, isBandScored } from "@/lib/score";
+import { ATTENDANCE_LABELS } from "@/lib/attendance";
+import { PERFORMANCE_LABELS, SKILL_LABELS } from "@/lib/lesson-log";
+import {
+  BAND_FIELDS,
+  BAND_FIELD_LABELS,
+  BAND_VALUES,
+  MEMBER_STATUS_LABELS,
+  SCORE_ENTRY_TYPE_LABELS,
+  formatBand,
+  isBandScored,
+} from "@/lib/score";
 import { TAG_SUGGESTIONS } from "@/lib/standing";
 import {
   cancelInvitation,
@@ -157,6 +169,31 @@ export default async function TeacherClassPage({
   const query = await searchParams;
   const error = typeof query.error === "string" ? query.error : undefined;
 
+  // Which student's overview is open, if any. A query parameter rather than a
+  // route: the panel is one card of this page expanded, so it belongs to this
+  // page's URL. It is a selector and not a credential — `loadStudentOverview`
+  // re-proves the membership against the class in the database before it reads
+  // anything, and this page has already proved the class.
+  const selected = typeof query.student === "string" ? query.student : undefined;
+
+  // Nothing is loaded unless a student is selected, so the roster costs exactly
+  // what it did before this milestone for every teacher who has not opened one.
+  const overview = selected
+    ? await loadStudentOverview(supabase, detail.classId, selected)
+    : null;
+
+  // A membership from another class, a removed one, an invitation that was
+  // never claimed and a random uuid all arrive here as the same `not-found`,
+  // and are reported with the same sentence the roster actions already use —
+  // so none of them can be told apart from the others.
+  const notice =
+    error ??
+    (overview?.kind === "not-found"
+      ? "That student is no longer on this class list."
+      : overview?.kind === "error"
+        ? "We couldn't load that student's overview just now. Please try again."
+        : undefined);
+
   const students = detail.roster.filter((entry) => entry.status === "joined");
   const pending = detail.roster.filter((entry) => entry.status === "invited");
 
@@ -182,7 +219,7 @@ export default async function TeacherClassPage({
         </Button>
       </div>
 
-      {error ? <Alert className="mb-5">{error}</Alert> : null}
+      {notice ? <Alert className="mb-5">{notice}</Alert> : null}
 
       <Card>
         <dl className="space-y-3">
@@ -309,7 +346,10 @@ export default async function TeacherClassPage({
       ) : (
         <ul className="space-y-3">
           {students.map((entry) => (
-            <li key={entry.membershipId}>
+            // The anchor the overview links carry, so opening and closing a
+            // panel returns the reader to the card they pressed rather than to
+            // the top of a long roster.
+            <li key={entry.membershipId} id={anchorFor(entry)}>
               <Card>
                 <Person entry={entry} />
                 {entry.joinedAt ? (
@@ -323,6 +363,19 @@ export default async function TeacherClassPage({
                 ) : null}
 
                 <Standing entry={entry} classId={detail.classId} />
+
+                <Overview
+                  entry={entry}
+                  classId={detail.classId}
+                  banded={banded}
+                  timezone={detail.timezone}
+                  overview={
+                    overview?.kind === "ok" &&
+                    overview.overview.membershipId === entry.membershipId
+                      ? overview.overview
+                      : null
+                  }
+                />
 
                 <Confirm
                   label="Remove student"
@@ -587,6 +640,274 @@ function Lesson({
         </Link>
       </Button>
     </>
+  );
+}
+
+/** Where a card sits in the page, so a link can return to it. */
+function anchorFor(entry: RosterEntry): string {
+  return `student-${entry.membershipId}`;
+}
+
+/**
+ * One student's existing facts, gathered — and the control that opens them.
+ *
+ * A view and only a view. There is no form here and no Server Action: every one
+ * of these values already has a dedicated control elsewhere on this page or on
+ * the lesson pages, and a second way to write them would be a second thing to
+ * keep correct. Opening the panel is a `<Link>`, closing it is a `<Link>`, and
+ * both work with JavaScript off.
+ *
+ * The panel is this card expanded rather than a page of its own. Everything it
+ * needs — the teacher's identity, the class's ownership, the roster — has
+ * already been established by the time the card renders, and a separate route
+ * would have to establish all of it again.
+ *
+ * `banded` gates the two band sections for the same reason `TargetBand` is
+ * gated: a class that scores on nothing has no bands to show, and the actions
+ * that record them refuse the write for that class anyway.
+ */
+function Overview({
+  entry,
+  classId,
+  banded,
+  timezone,
+  overview,
+}: {
+  entry: RosterEntry;
+  classId: string;
+  banded: boolean;
+  timezone: string;
+  overview: StudentOverview | null;
+}) {
+  const anchor = anchorFor(entry);
+
+  if (!overview) {
+    return (
+      <div className="mt-3">
+        <Button asChild variant="outline" size="sm">
+          <Link
+            href={`/teacher/${classId}?student=${entry.membershipId}#${anchor}`}
+          >
+            View overview
+          </Link>
+        </Button>
+      </div>
+    );
+  }
+
+  const { bands } = overview;
+
+  // Nothing to say rather than three empty rows: a student nobody has assessed
+  // has no starting band, no current band and no goal, and printing "Not set"
+  // three times says less than one sentence does.
+  const unassessed =
+    bands.targetBand === null &&
+    bands.startOverall === null &&
+    bands.currentOverall === null;
+
+  return (
+    <div className="mt-3 min-w-0 border-t border-border pt-3">
+      {/* Named again inside the panel: the card's heading is above it, but the
+          overview is the thing being read and it should say whose it is. */}
+      <h4 className="font-semibold break-words text-foreground">
+        {overview.name ?? overview.email ?? "This student"}
+      </h4>
+      {overview.name && overview.email ? (
+        <p className="mb-4 text-sm break-words text-muted-foreground">
+          {overview.email}
+        </p>
+      ) : (
+        <div className="mb-4" />
+      )}
+
+      <div className="space-y-5">
+        {banded ? (
+          <Section title="Progress">
+            {unassessed ? (
+              <Empty>No bands have been recorded yet.</Empty>
+            ) : (
+              <dl className="space-y-2">
+                {/* Every value here is the database's own. `target_band`,
+                    `start_overall` and `current_overall` come off
+                    `v_member_current_band` and the status off
+                    `v_member_performance_status`; nothing is compared or
+                    averaged on this page. */}
+                <Fact term="Target" value={formatBand(bands.targetBand) ?? "Not set"} />
+                <Fact
+                  term="Starting"
+                  value={formatBand(bands.startOverall) ?? "Not recorded"}
+                />
+                <Fact
+                  term="Current"
+                  value={formatBand(bands.currentOverall) ?? "Not recorded"}
+                />
+                <Fact term="Status" value={MEMBER_STATUS_LABELS[bands.status]} />
+              </dl>
+            )}
+          </Section>
+        ) : null}
+
+        <Section title="Strengths">
+          <Tags tags={overview.strengths} empty="No strengths recorded yet." />
+        </Section>
+
+        <Section title="Focus areas">
+          <Tags tags={overview.focusAreas} empty="No focus areas recorded yet." />
+        </Section>
+
+        <Section title="Attendance">
+          {overview.attendance.length === 0 ? (
+            <Empty>No attendance recorded yet.</Empty>
+          ) : (
+            <ul className="space-y-2.5">
+              {overview.attendance.map((mark) => (
+                <li key={mark.sessionId} className="min-w-0">
+                  <p className="text-sm text-foreground">
+                    {ATTENDANCE_LABELS[mark.status]}
+                  </p>
+                  {/* The class's own clock, through `lib/time.ts`, exactly as
+                      the lesson list above reads the same two instants. */}
+                  <p className="text-xs break-words text-muted-foreground">
+                    {formatZonedDate(timezone, mark.startsAt)} ·{" "}
+                    {formatZonedTime(timezone, mark.startsAt)} –{" "}
+                    {formatZonedTime(timezone, mark.endsAt)}
+                    {mark.sessionTitle ? ` · ${mark.sessionTitle}` : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        {banded ? (
+          <Section title="Score history">
+            {overview.scores.length === 0 ? (
+              <Empty>No score entries yet.</Empty>
+            ) : (
+              <ul className="space-y-2.5">
+                {overview.scores.map((score) => (
+                  <li key={score.entryId} className="min-w-0">
+                    {/* `recorded_on` is a bare `date` — a calendar square, read
+                        as one. No instant, and so no zone conversion. */}
+                    <p className="text-sm text-foreground">
+                      {DATE.format(asDate(score.recordedOn))} ·{" "}
+                      {SCORE_ENTRY_TYPE_LABELS[score.entryType]}
+                    </p>
+                    <p className="text-xs break-words text-muted-foreground">
+                      {bandsOf(score)}
+                    </p>
+                    {score.note ? (
+                      <p className="mt-1 text-sm break-words text-foreground">
+                        {score.note}
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+        ) : null}
+
+        <Section title="Lesson notes">
+          {overview.notes.length === 0 ? (
+            <Empty>No lesson notes yet.</Empty>
+          ) : (
+            <ul className="space-y-2.5">
+              {overview.notes.map((note) => (
+                <li key={note.noteId} className="min-w-0">
+                  <p className="text-sm break-words text-foreground">
+                    {note.topic}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {DATE.format(asDate(note.lessonDate))} ·{" "}
+                    {SKILL_LABELS[note.skill]} ·{" "}
+                    {PERFORMANCE_LABELS[note.performance]}
+                  </p>
+                  {note.note ? (
+                    <p className="mt-1 text-sm break-words text-foreground">
+                      {note.note}
+                    </p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      </div>
+
+      <div className="mt-5">
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/teacher/${classId}#${anchor}`}>Close overview</Link>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Every band an entry actually carries, in the schema's own order.
+ *
+ * A skill that was not measured is left out rather than shown blank: `null` on
+ * `score_entries` means "not measured", and an empty slot beside four numbers
+ * reads like a zero.
+ */
+function bandsOf(score: StudentOverview["scores"][number]): string {
+  return BAND_FIELDS.map((field) => {
+    const band = formatBand(score[field]);
+    return band === null ? null : `${BAND_FIELD_LABELS[field]} ${band}`;
+  })
+    .filter((part): part is string => part !== null)
+    .join(" · ");
+}
+
+/** One labelled block inside the overview. */
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <p className="mb-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        {title}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+/** What a section says when the student has no history of that kind yet. */
+function Empty({ children }: { children: ReactNode }) {
+  return <p className="text-sm text-muted-foreground">{children}</p>;
+}
+
+/** One term and its value, in the same shape as the class facts above. */
+function Fact({ term, value }: { term: string; value: string }) {
+  return (
+    <div className="flex gap-4 text-sm">
+      <dt className="w-20 shrink-0 text-muted-foreground">{term}</dt>
+      <dd className="break-words text-foreground">{value}</dd>
+    </div>
+  );
+}
+
+/**
+ * A read-only list of tags, or the sentence that says there are none.
+ *
+ * The same chips `TagEditor` renders, without the remove control — the editor
+ * three lines up this card is where these are changed, and offering a second
+ * way to change them here would be two controls writing one column.
+ */
+function Tags({ tags, empty }: { tags: string[]; empty: string }) {
+  if (tags.length === 0) return <Empty>{empty}</Empty>;
+
+  return (
+    <ul className="flex flex-wrap gap-1.5">
+      {tags.map((tag) => (
+        <li
+          key={tag}
+          className="min-w-0 rounded-full border border-input bg-background px-2.5 py-1 text-xs break-words text-foreground"
+        >
+          {tag}
+        </li>
+      ))}
+    </ul>
   );
 }
 
