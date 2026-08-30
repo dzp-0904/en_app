@@ -25,11 +25,14 @@ import {
 } from "@/lib/teacher";
 import { formatZonedDate, formatZonedTime } from "@/lib/time";
 
+import { TagEditor } from "@/components/roster/tag-editor";
 import { BAND_VALUES, formatBand, isBandScored } from "@/lib/score";
+import { TAG_SUGGESTIONS } from "@/lib/standing";
 import {
   cancelInvitation,
   removeStudent,
   resendInvitation,
+  saveStandingNotes,
   setTargetBand,
 } from "./actions";
 
@@ -288,6 +291,15 @@ export default async function TeacherClassPage({
         Students ({students.length})
       </h2>
 
+      {/* One list for every card below. A datalist is a suggestion and not a
+          constraint — both columns are free text, and a teacher typing "Task 2
+          structure" is the case these fields exist for. */}
+      <datalist id={SUGGESTION_LIST}>
+        {TAG_SUGGESTIONS.map((suggestion) => (
+          <option key={suggestion} value={suggestion} />
+        ))}
+      </datalist>
+
       {students.length === 0 ? (
         <Card>
           <p className="text-sm text-muted-foreground">
@@ -309,6 +321,8 @@ export default async function TeacherClassPage({
                 {banded ? (
                   <TargetBand entry={entry} classId={detail.classId} />
                 ) : null}
+
+                <Standing entry={entry} classId={detail.classId} />
 
                 <Confirm
                   label="Remove student"
@@ -451,6 +465,62 @@ function TargetBand({
           ))}
         </select>
 
+        <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
+      </div>
+    </form>
+  );
+}
+
+/** The id every tag input points at; the list itself is rendered once. */
+const SUGGESTION_LIST = "tag-suggestions";
+
+/**
+ * What this student does well, and what they are working on.
+ *
+ * One form and one Save for both lists, because they are one judgement: a
+ * teacher deciding that fluency has come good and grammar is now the problem
+ * changes both in the same breath, and two buttons would let a card sit half
+ * saved. `saveStandingNotes` writes both columns in a single UPDATE for the
+ * same reason.
+ *
+ * Each `TagEditor` is keyed on its own saved list. That is what re-seeds the
+ * pending state from the server after a save: the stored list changes, the key
+ * changes, the editor remounts holding what was actually written. It also means
+ * a rejected save leaves the editor showing the stored lists again rather than
+ * the attempted ones — the same honesty the target-band line has, where what is
+ * drawn is always what the database holds.
+ *
+ * `\u0000` joins the key because it cannot occur in a tag; a comma could.
+ */
+function Standing({ entry, classId }: { entry: RosterEntry; classId: string }) {
+  return (
+    <form
+      action={saveStandingNotes.bind(null, classId, entry.membershipId)}
+      className="mt-3 min-w-0 border-t border-border pt-3"
+    >
+      <TagEditor
+        key={`s:${entry.strengths.join("\u0000")}`}
+        label="Strengths"
+        hint="What this student does well"
+        name="strengths"
+        addName="addStrength"
+        saved={entry.strengths}
+        empty="No strengths recorded yet."
+        listId={SUGGESTION_LIST}
+      />
+
+      <TagEditor
+        key={`f:${entry.focusAreas.join("\u0000")}`}
+        label="Focus areas"
+        hint="What needs improvement"
+        name="focusAreas"
+        addName="addFocusArea"
+        saved={entry.focusAreas}
+        empty="No focus areas recorded yet."
+        listId={SUGGESTION_LIST}
+      />
+
+      <div className="mt-3">
         <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
       </div>
     </form>

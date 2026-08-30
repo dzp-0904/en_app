@@ -20,6 +20,12 @@ import {
   readBand,
   SCORE_NOTE_MAX_LENGTH,
 } from "@/lib/score";
+import {
+  MAX_TAG_LENGTH,
+  MAX_TAGS,
+  readTags,
+  type TagsResult,
+} from "@/lib/standing";
 import { createClient } from "@/lib/supabase/server";
 import {
   isUuid,
@@ -293,6 +299,124 @@ export async function setTargetBand(
   // The roster is what changed, but the student's own progress panel reads the
   // same column through `v_member_current_band`, so the sidebar-level revalidate
   // that `removeStudent` uses is the right breadth here too.
+  revalidatePath("/teacher", "layout");
+  redirect(classPath);
+}
+
+/**
+ * Reads one tag list out of the submitted form.
+ *
+ * Two fields feed one array. `field` carries the tags the editor is already
+ * holding, one repeated input per tag, and `addField` carries whatever is still
+ * sitting in the "add" box when Save is pressed. Merging them here is what makes
+ * a typed-but-not-added tag save instead of vanishing — an easy thing for a
+ * teacher to do, and a silent loss if only the chips were read. It is also what
+ * lets the editor work with JavaScript switched off, where the box is the only
+ * way to add anything at all.
+ *
+ * An untouched box is "" and adds nothing. A box holding only spaces is not the
+ * same thing: the teacher typed something, so it is passed through and refused
+ * as blank rather than ignored.
+ */
+function readSubmittedTags(
+  formData: FormData,
+  field: string,
+  addField: string,
+): TagsResult {
+  const submitted: unknown[] = formData.getAll(field);
+  const added = formData.get(addField);
+
+  if (typeof added === "string" && added !== "") {
+    submitted.push(added);
+  }
+
+  return readTags(submitted);
+}
+
+/** Turns a refusal into words, naming the list that was wrong. */
+function describeRejection(result: TagsResult, noun: string): string {
+  if (result.ok) return "";
+
+  switch (result.rejection.kind) {
+    case "blank":
+      return `A ${noun} cannot be blank. Please type something or remove it.`;
+    case "too-long":
+      return `A ${noun} must be ${MAX_TAG_LENGTH} characters or fewer.`;
+    case "duplicate":
+      return `"${result.rejection.value}" is already listed under ${noun}s.`;
+    case "too-many":
+      return `You can record up to ${MAX_TAGS} ${noun}s for one student.`;
+    case "shape":
+      return `We could not save those ${noun}s. Please try again.`;
+  }
+}
+
+/**
+ * Saves one student's strengths and focus areas together.
+ *
+ * One action and one write for both columns, because they are one thought: a
+ * teacher looking at a student decides what is going well and what to work on
+ * in the same moment, and two separate saves would let a card end up half
+ * updated. `strengths` and `focus_areas` are both `text[] not null`, so there is
+ * no "unset" to represent — clearing a list writes `{}`, which is exactly what
+ * the column already defaults to.
+ *
+ * Validation is `readTags`, applied to each list independently so the message
+ * can name which one was wrong. It refuses rather than repairs: an overlong tag
+ * comes back as an error instead of a truncated tag, and a repeat comes back as
+ * an error instead of quietly disappearing. Neither column has a database
+ * constraint to fall back on, so this is the only place either rule exists.
+ *
+ * Authorisation and the write are `setTargetBand`'s exactly — `authoriseRoster`
+ * for the teacher, the class and the shape of the membership id, then all four
+ * state checks in the WHERE clause. A removed student, an unclaimed invitation,
+ * a membership from another class and a membership from another teacher's class
+ * all match zero rows and all produce the same sentence, so nothing about a
+ * foreign membership can be read off the difference.
+ */
+export async function saveStandingNotes(
+  classId: string,
+  membershipId: string,
+  formData: FormData,
+) {
+  const { supabase, classPath } = await authoriseRoster(classId, membershipId);
+
+  const strengths = readSubmittedTags(formData, "strengths", "addStrength");
+
+  if (!strengths.ok) {
+    failTo(classPath, describeRejection(strengths, "strength"));
+  }
+
+  const focusAreas = readSubmittedTags(formData, "focusAreas", "addFocusArea");
+
+  if (!focusAreas.ok) {
+    failTo(classPath, describeRejection(focusAreas, "focus area"));
+  }
+
+  const { data, error } = await supabase
+    .from("class_members")
+    // The only two columns written. `updated_at` moves on its own, through the
+    // `set_updated_at` trigger the table already carries.
+    .update({ strengths: strengths.tags, focus_areas: focusAreas.tags })
+    .eq("id", membershipId)
+    // Both ids, as every roster write does: a membership id from another class
+    // — including one of this teacher's own — matches nothing.
+    .eq("class_id", classId)
+    .eq("join_status", "joined")
+    .is("removed_at", null)
+    .select("id");
+
+  if (error) {
+    logDbError("class_members.update(strengths, focus_areas)", error);
+    failTo(classPath, "We could not save those notes. Please try again.");
+  }
+
+  if (!data || data.length === 0) {
+    failTo(classPath, "That student is no longer on this class list.");
+  }
+
+  // The student's own class page reads the same two columns off their own
+  // membership row, so the breadth matches `setTargetBand`.
   revalidatePath("/teacher", "layout");
   redirect(classPath);
 }

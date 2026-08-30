@@ -98,6 +98,17 @@ export type RosterEntry = {
    * because the roster does not otherwise touch the band views.
    */
   targetBand: number | null;
+  /**
+   * `class_members.strengths` and `class_members.focus_areas` — the teacher's
+   * own notes on what this student does well and what they are working on.
+   *
+   * Both are `text[] not null default '{}'`, so an empty array is the real
+   * "nothing recorded" and null never occurs. Kept as arrays rather than joined
+   * into a string because order is meaningful and the editor writes them back
+   * one tag at a time.
+   */
+  strengths: string[];
+  focusAreas: string[];
 };
 
 export type TeacherClassDetail = TeacherClass & {
@@ -397,7 +408,7 @@ export async function loadTeacherClass(
   const { data: members, error: rosterError } = await supabase
     .from("class_members")
     .select(
-      "id, join_status, invited_email, invited_name, invited_at, invite_email_sent_at, joined_at, target_band, profiles!class_members_student_id_fkey(full_name, email)",
+      "id, join_status, invited_email, invited_name, invited_at, invite_email_sent_at, joined_at, target_band, strengths, focus_areas, profiles!class_members_student_id_fkey(full_name, email)",
     )
     .eq("class_id", classId)
     .in("join_status", PRESENT)
@@ -429,6 +440,8 @@ export async function loadTeacherClass(
       invitedAt: member.invited_at,
       inviteEmailSentAt: member.invite_email_sent_at,
       targetBand: member.target_band,
+      strengths: member.strengths,
+      focusAreas: member.focus_areas,
     };
   });
 

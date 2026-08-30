@@ -113,6 +113,17 @@ export type StudentClassDetail = StudentClass & {
   endDate: string | null;
   scheduleNote: string | null;
   /**
+   * The student's own `class_members.strengths` and `class_members.focus_areas`
+   * — read-only here, and only ever their own row.
+   *
+   * They come off the membership `loadStudentClass` already fetches, which is
+   * pinned to `student_id` and to this one class, so a classmate's notes are
+   * not filtered out in TypeScript: they are never selected. Both columns are
+   * `not null default '{}'`, so empty means the teacher has recorded nothing.
+   */
+  strengths: string[];
+  focusAreas: string[];
+  /**
    * `classes.timezone` — the clock every session of this class is read on.
    *
    * Carried here so the lesson list can hand it to `lib/time.ts` unchanged.
@@ -174,7 +185,7 @@ export async function loadStudentClass(
   const { data, error } = await supabase
     .from("class_members")
     .select(
-      "id, joined_at, classes!inner(id, name, course_type, course_type_other, target_band, start_date, end_date, schedule_note, timezone, profiles!inner(full_name))",
+      "id, joined_at, strengths, focus_areas, classes!inner(id, name, course_type, course_type_other, target_band, start_date, end_date, schedule_note, timezone, profiles!inner(full_name))",
     )
     .eq("student_id", studentId)
     .eq("class_id", classId)
@@ -206,6 +217,8 @@ export async function loadStudentClass(
       startDate: data.classes.start_date,
       endDate: data.classes.end_date,
       scheduleNote: data.classes.schedule_note,
+      strengths: data.strengths,
+      focusAreas: data.focus_areas,
       timezone: data.classes.timezone,
     },
   };

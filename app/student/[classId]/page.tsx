@@ -58,6 +58,52 @@ const DATE = new Intl.DateTimeFormat("en-GB", {
 });
 
 /** `YYYY-MM-DD` read as a calendar date, not a moment in the viewer's zone. */
+/**
+ * One of the two lists the teacher keeps on this student, read-only.
+ *
+ * There is no action here and no form: `class_members` grants the student
+ * SELECT and nothing else — `class_members_student_select` is the only student
+ * policy on the table, and there is no student UPDATE policy for a write to
+ * pass through even if this page offered one. The page stays what it has always
+ * been, a view of the student's own row.
+ *
+ * An empty list says so in words. `strengths` and `focus_areas` are
+ * `not null default '{}'`, so "nothing recorded" arrives as `[]` — which must
+ * never be what the student actually reads.
+ */
+function Tags({
+  label,
+  tags,
+  empty,
+}: {
+  label: string;
+  tags: string[];
+  empty: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs text-muted-foreground">{label}</p>
+
+      {tags.length === 0 ? (
+        <p className="mt-1 text-sm text-muted-foreground">{empty}</p>
+      ) : (
+        // Wrapping, never scrolling: a teacher's own phrase can be long, and
+        // the card has 390px to work with.
+        <ul className="mt-1.5 flex flex-wrap gap-1.5">
+          {tags.map((tag) => (
+            <li
+              key={tag}
+              className="min-w-0 rounded-full border border-input bg-background px-2.5 py-1 text-xs break-words text-foreground"
+            >
+              {tag}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function asDate(iso: string): Date {
   return new Date(`${iso}T00:00:00Z`);
 }
@@ -236,6 +282,25 @@ export default async function StudentClassPage({
             </div>
           ))}
         </dl>
+      </Card>
+
+      <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        My strengths and focus
+      </h2>
+
+      <Card>
+        <div className="space-y-4">
+          <Tags
+            label="Strengths"
+            tags={detail.strengths}
+            empty="No strengths recorded yet."
+          />
+          <Tags
+            label="Focus areas"
+            tags={detail.focusAreas}
+            empty="No focus areas recorded yet."
+          />
+        </div>
       </Card>
 
       {banded ? (
