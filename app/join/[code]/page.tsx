@@ -147,7 +147,7 @@ export default async function JoinPage({
   if (!preview) {
     return (
       <Frame>
-        <Card className="text-center">
+        <Card variant="elevated" className="text-center">
           <h1 className="mb-2 text-xl font-semibold text-foreground">
             Liên kết mời này không hợp lệ
           </h1>
@@ -178,7 +178,7 @@ export default async function JoinPage({
 
   return (
     <Frame>
-      <Card className="mb-6 text-center">
+      <Card variant="elevated" className="mb-6 text-center">
         <p className="mb-3 text-xs font-medium tracking-wide text-muted-foreground uppercase">
           Bạn được mời tham gia
         </p>
@@ -206,7 +206,7 @@ export default async function JoinPage({
         </ul>
       </Card>
 
-      <Card>
+      <Card variant="elevated">
         {error ? <Alert className="mb-5">{error}</Alert> : null}
 
         {state.kind === "anonymous" ? (

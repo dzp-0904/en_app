@@ -263,7 +263,8 @@ function logDbError(
 }
 
 /**
- * Every class the teacher owns and has not archived, newest first.
+ * Every class the teacher owns and has not archived, newest first — the class
+ * rows alone, with no roster tally.
  *
  * Not capped at one, unlike the lookup in `lib/onboarding.ts`. Nothing in the
  * schema limits a teacher to a single class — `classes` is keyed only by its
@@ -272,11 +273,18 @@ function logDbError(
  * `null` means the query failed, which is deliberately not `[]`. Telling a
  * teacher with four classes that they have none would invite them to create a
  * fifth.
+ *
+ * Split out from `loadTeacherClasses` in M23. Four pages — Lịch dạy, Nhật ký
+ * buổi học, Báo cáo and Học phí — need the class rows only, to name a class and
+ * to scope their own query, and were paying for a `class_members` read they
+ * then threw away. On this connection one Supabase round trip is ~67 ms, and
+ * these pages make their whole chain of them one at a time, so the discarded
+ * count was a measurable share of every one of those navigations.
  */
-export async function loadTeacherClasses(
+export async function loadTeacherClassList(
   supabase: Awaited<ReturnType<typeof createClient>>,
   teacherId: string,
-): Promise<TeacherClass[] | null> {
+): Promise<TeacherClassFields[] | null> {
   const { data: classes, error } = await supabase
     .from("classes")
     .select(CLASS_COLUMNS)
@@ -289,37 +297,7 @@ export async function loadTeacherClasses(
     return null;
   }
 
-  if (!classes || classes.length === 0) return [];
-
-  // Counted in a second statement and grouped here rather than as embedded
-  // aggregates: PostgREST cannot express two differently-filtered counts over
-  // the same embedded relation in one request, and a single filtered count
-  // would silently drop the pending total. Two plain queries stay legible and
-  // stay typed.
-  const { data: members, error: memberError } = await supabase
-    .from("class_members")
-    .select("class_id, join_status")
-    .in(
-      "class_id",
-      classes.map((row) => row.id),
-    )
-    .in("join_status", PRESENT)
-    .is("removed_at", null);
-
-  if (memberError) {
-    logDbError("class_members.count", memberError);
-    return null;
-  }
-
-  const joined = new Map<string, number>();
-  const pending = new Map<string, number>();
-
-  for (const member of members ?? []) {
-    const tally = member.join_status === "joined" ? joined : pending;
-    tally.set(member.class_id, (tally.get(member.class_id) ?? 0) + 1);
-  }
-
-  return classes.map((row) => ({
+  return (classes ?? []).map((row) => ({
     classId: row.id,
     className: row.name,
     courseType: row.course_type,
@@ -329,9 +307,88 @@ export async function loadTeacherClasses(
     endDate: row.end_date,
     scheduleNote: row.schedule_note,
     timezone: row.timezone,
-    studentCount: joined.get(row.id) ?? 0,
-    pendingCount: pending.get(row.id) ?? 0,
   }));
+}
+
+/**
+ * How many members each of `classIds` has, split by whether the invitation has
+ * been claimed.
+ *
+ * Counted in a second statement and grouped here rather than as embedded
+ * aggregates: PostgREST cannot express two differently-filtered counts over the
+ * same embedded relation in one request, and a single filtered count would
+ * silently drop the pending total. Two plain queries stay legible and stay
+ * typed.
+ *
+ * Exported so a caller that already has the class rows can run this
+ * *concurrently* with its own query instead of behind it — which is what
+ * `loadTeacherDashboard` does.
+ */
+export async function tallyClassMembers(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classIds: string[],
+): Promise<{ joined: Map<string, number>; pending: Map<string, number> } | null> {
+  const joined = new Map<string, number>();
+  const pending = new Map<string, number>();
+
+  if (classIds.length === 0) return { joined, pending };
+
+  const { data: members, error } = await supabase
+    .from("class_members")
+    .select("class_id, join_status")
+    .in("class_id", classIds)
+    .in("join_status", PRESENT)
+    .is("removed_at", null);
+
+  if (error) {
+    logDbError("class_members.count", error);
+    return null;
+  }
+
+  for (const member of members ?? []) {
+    const tally = member.join_status === "joined" ? joined : pending;
+    tally.set(member.class_id, (tally.get(member.class_id) ?? 0) + 1);
+  }
+
+  return { joined, pending };
+}
+
+/** Attaches a `tallyClassMembers` result to the rows it was counted for. */
+export function withMemberCounts(
+  classes: TeacherClassFields[],
+  counts: { joined: Map<string, number>; pending: Map<string, number> },
+): TeacherClass[] {
+  return classes.map((row) => ({
+    ...row,
+    studentCount: counts.joined.get(row.classId) ?? 0,
+    pendingCount: counts.pending.get(row.classId) ?? 0,
+  }));
+}
+
+/**
+ * The class list plus its roster tallies — what `/teacher/classes` and the
+ * dashboard's class cards show.
+ *
+ * Two sequential round trips by necessity: the second query is scoped to the
+ * ids the first returned. A caller that has other work to do alongside the
+ * tally should compose `loadTeacherClassList`, `tallyClassMembers` and
+ * `withMemberCounts` itself rather than await this.
+ */
+export async function loadTeacherClasses(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  teacherId: string,
+): Promise<TeacherClass[] | null> {
+  const classes = await loadTeacherClassList(supabase, teacherId);
+  if (classes === null) return null;
+  if (classes.length === 0) return [];
+
+  const counts = await tallyClassMembers(
+    supabase,
+    classes.map((row) => row.classId),
+  );
+  if (counts === null) return null;
+
+  return withMemberCounts(classes, counts);
 }
 
 /**

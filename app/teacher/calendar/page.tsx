@@ -24,7 +24,7 @@ import {
 } from "@/lib/calendar";
 import { loadUserState } from "@/lib/onboarding";
 import { createClient } from "@/lib/supabase/server";
-import { loadTeacherClasses } from "@/lib/teacher";
+import { loadTeacherClassList } from "@/lib/teacher";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
@@ -85,7 +85,7 @@ export default async function TeacherCalendarPage({
   }
 
   const supabase = await createClient();
-  const classes = await loadTeacherClasses(supabase, state.teacher.userId);
+  const classes = await loadTeacherClassList(supabase, state.teacher.userId);
 
   if (classes === null) {
     return (

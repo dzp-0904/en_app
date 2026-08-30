@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Database } from "@/lib/database.types";
 import type { createClient } from "@/lib/supabase/server";
-import type { TeacherClass } from "@/lib/teacher";
+import type { TeacherClassFields } from "@/lib/teacher";
 
 /**
  * The monthly parent reports a teacher has generated.
@@ -80,7 +80,7 @@ function logDbError(
 
 export async function loadTeacherReports(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  classes: TeacherClass[],
+  classes: TeacherClassFields[],
 ): Promise<TeacherReport[] | null> {
   if (classes.length === 0) return [];
 

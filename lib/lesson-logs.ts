@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Performance, Skill } from "@/lib/lesson-log";
 import type { createClient } from "@/lib/supabase/server";
-import type { TeacherClass } from "@/lib/teacher";
+import type { TeacherClassFields } from "@/lib/teacher";
 
 /**
  * The teacher's lesson notes, across every class rather than one session.
@@ -73,7 +73,7 @@ function logDbError(
 
 export async function loadTeacherLessonLogs(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  classes: TeacherClass[],
+  classes: TeacherClassFields[],
   filters: { classId?: string | null; skill?: Skill | null },
 ): Promise<TeacherLessonLog[] | null> {
   if (classes.length === 0) return [];

@@ -103,7 +103,7 @@ export default async function TeacherClassesPage() {
         <ul className="space-y-3">
           {classes.map((entry) => (
             <li key={entry.classId}>
-              <Card>
+              <Card variant="list">
                 <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
                   <div className="min-w-0 grow basis-48">
                     <h2 className="font-semibold break-words text-foreground">

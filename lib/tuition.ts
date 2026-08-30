@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Database } from "@/lib/database.types";
 import type { createClient } from "@/lib/supabase/server";
-import type { TeacherClass } from "@/lib/teacher";
+import type { TeacherClassFields } from "@/lib/teacher";
 
 /**
  * The teacher's tuition ledger.
@@ -88,7 +88,7 @@ function logDbError(
 
 export async function loadTeacherTuition(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  classes: TeacherClass[],
+  classes: TeacherClassFields[],
 ): Promise<TuitionRecord[] | null> {
   if (classes.length === 0) return [];
 

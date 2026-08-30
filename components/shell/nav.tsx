@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
+import { PendingBar } from "@/components/ui/pending-bar";
 
 /**
  * The sidebar's list of sections, which knows which one you are looking at.
@@ -56,7 +57,6 @@ export function Nav({
   root,
   fallback,
   label,
-  heading,
   className,
 }: {
   entries: NavEntry[];
@@ -66,8 +66,6 @@ export function Nav({
   fallback?: string;
   /** Names the landmark, e.g. "Điều hướng chính". */
   label: string;
-  /** The uppercase line above the list; hidden on the narrow top bar. */
-  heading: string;
   className?: string;
 }) {
   const pathname = usePathname();
@@ -92,13 +90,6 @@ export function Nav({
 
   return (
     <nav aria-label={label} className={className}>
-      {/* The heading is the sidebar saying which product you are in. On the
-          top bar there is no column for it to head, so it is dropped rather
-          than squeezed in. */}
-      <p className="mb-2 hidden text-xs font-medium tracking-wide text-muted-foreground uppercase lg:block">
-        {heading}
-      </p>
-
       <ul className="flex flex-wrap items-center gap-1 lg:flex-col lg:flex-nowrap lg:items-stretch">
         {entries.map((entry) => {
           const current = entry.href === currentHref;
@@ -109,14 +100,17 @@ export function Nav({
                 href={entry.href}
                 aria-current={current ? "page" : undefined}
                 className={cn(
-                  "flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                  "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                   current
                     ? "bg-secondary text-secondary-foreground"
                     : "text-muted-foreground hover:bg-background hover:text-foreground",
                 )}
               >
-                <span className="shrink-0">{entry.icon}</span>
+                <span className="w-4 shrink-0 text-center opacity-70">
+                  {entry.icon}
+                </span>
                 {entry.label}
+                <PendingBar />
               </Link>
             </li>
           );

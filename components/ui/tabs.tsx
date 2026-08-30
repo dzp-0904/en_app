@@ -2,6 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 
 import { cn } from "@/lib/utils";
+import { PendingBar } from "@/components/ui/pending-bar";
 
 /**
  * The Figma's segmented control, in its two treatments:
@@ -105,7 +106,7 @@ function Tabs({
               prefetch={prefetch}
               aria-current={item.current ? "page" : undefined}
               className={cn(
-                "block px-4 py-1.5 text-sm font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                "relative block px-4 py-1.5 text-sm font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                 ITEM[variant],
                 item.current
                   ? ACTIVE[variant]
@@ -113,6 +114,7 @@ function Tabs({
               )}
             >
               {item.label}
+              <PendingBar />
             </Link>
           </li>
         ))}

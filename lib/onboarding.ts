@@ -112,11 +112,35 @@ async function readUserState(): Promise<UserState> {
     email: user.email ?? null,
   };
 
-  const { data: profile, error } = await supabase
-    .from("profiles")
-    .select("role, full_name, teaching_type, deactivated_at")
-    .eq("id", user.id)
-    .maybeSingle();
+  // Issued together, not one behind the other. Both are keyed on the `user.id`
+  // `getUser()` just verified and neither reads the other's answer, so the only
+  // thing sequencing them bought was a second ~67 ms round trip on every
+  // authenticated request. The classes probe is speculative — it is a teacher's
+  // question, and the role is in the reply that has not arrived yet — so a
+  // student pays for one extra statement. It is `select id, name from classes
+  // where teacher_id = <their own id>`, which is RLS-scoped, matches nothing,
+  // and runs concurrently, so it costs them no wall-clock time and cannot
+  // return anything they may not see.
+  const [{ data: profile, error }, { data: classes, error: classError }] =
+    await Promise.all([
+      supabase
+        .from("profiles")
+        .select("role, full_name, teaching_type, deactivated_at")
+        .eq("id", user.id)
+        .maybeSingle(),
+      supabase
+        .from("classes")
+        .select("id, name")
+        .eq("teacher_id", user.id)
+        .is("archived_at", null)
+        .order("created_at", { ascending: false })
+        // Two, not one. The first row is `currentClass`; the second exists only
+        // to answer "is there more than one", which is what tells the
+        // onboarding wizard's last step that it is no longer the right page.
+        // Counting them all would read a teacher's whole class list on every
+        // authenticated request to learn a boolean.
+        .limit(2),
+    ]);
 
   if (error) {
     console.error("[onboarding] failed to load profile", {
@@ -152,19 +176,6 @@ async function readUserState(): Promise<UserState> {
   // kept, so that adding a third role fails closed here rather than falling
   // through into the teacher branch.
   if (profile.role !== "teacher") return unplaceable;
-
-  const { data: classes, error: classError } = await supabase
-    .from("classes")
-    .select("id, name")
-    .eq("teacher_id", user.id)
-    .is("archived_at", null)
-    .order("created_at", { ascending: false })
-    // Two, not one. The first row is `currentClass`; the second exists only to
-    // answer "is there more than one", which is what tells the onboarding
-    // wizard's last step that it is no longer the right page. Counting them all
-    // would read a teacher's whole class list on every authenticated request to
-    // learn a boolean.
-    .limit(2);
 
   if (classError) {
     console.error("[onboarding] failed to load classes", {

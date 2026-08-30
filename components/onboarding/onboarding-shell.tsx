@@ -46,7 +46,7 @@ export function OnboardingShell({
 
       <Stepper step={step} />
 
-      <Card className="p-8">
+      <Card variant="elevated" className="p-8">
         <CardHeader>
           {titleAdornment ? (
             <div className="mb-2">{titleAdornment}</div>

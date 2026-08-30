@@ -80,7 +80,7 @@ export default async function SignUpPage({ searchParams }: PageSearchParams) {
   if (pending) {
     return (
       <AuthShell brand={BRAND}>
-        <Card>
+        <Card variant="elevated">
           <CardHeader>
             <CardTitle>Kiểm tra hộp thư của bạn</CardTitle>
             <CardDescription>

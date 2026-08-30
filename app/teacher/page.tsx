@@ -55,10 +55,18 @@ export const metadata: Metadata = {
 /** How many classes the dashboard shows before deferring to `/teacher/classes`. */
 const PREVIEW = 4;
 
-/** The strip under a class card: one segment per student, by standing. */
+/**
+ * The strip under a class card: one segment per student, by standing.
+ *
+ * Steady is the Figma's `#E8E6DE` — the border grey, i.e. an unfilled segment.
+ * It was indigo until M23, which made a student with nothing to report look
+ * like the most emphasised thing on the card and left the strip with three
+ * saturated colours competing. The design fills a segment only when the
+ * standing is news.
+ */
 const SEGMENT: Record<DashboardMember["status"], string> = {
   improving: "bg-green",
-  stable: "bg-primary",
+  stable: "bg-border",
   needs_attention: "bg-orange",
 };
 
@@ -139,7 +147,7 @@ export default async function TeacherPage() {
               value={classes.length}
             />
             <StatCard
-              tone="navy"
+              tone="primary"
               label="Học viên"
               value={dashboard.studentTotal}
             />
@@ -169,7 +177,7 @@ export default async function TeacherPage() {
               <ul className="space-y-3">
                 {preview.map((entry) => (
                   <li key={entry.classId}>
-                    <Card className="p-5">
+                    <Card variant="list">
                       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
                         <div className="min-w-0 grow basis-48">
                           <h3 className="font-semibold break-words text-foreground">
@@ -247,7 +255,7 @@ export default async function TeacherPage() {
                 <ul className="space-y-3">
                   {dashboard.needsAttention.map((member) => (
                     <li key={member.membershipId}>
-                      <Card className="p-5">
+                      <Card variant="list">
                         <div className="flex items-start gap-3">
                           <span
                             aria-hidden

@@ -73,7 +73,7 @@ export default async function LoginPage({ searchParams }: PageSearchParams) {
   if (signedInAs) {
     return (
       <AuthShell brand={BRAND}>
-        <Card>
+        <Card variant="elevated">
           <CardHeader>
             <CardTitle>Bạn đã đăng nhập</CardTitle>
             <CardDescription>

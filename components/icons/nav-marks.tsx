@@ -87,12 +87,21 @@ export function TuitionMark(props: ComponentProps<"svg">) {
   );
 }
 
-/** ⊙ — the settings dial. */
+/**
+ * A gear — settings.
+ *
+ * The Figma writes this row's icon as `⊙` (CIRCLED DOT OPERATOR), which M22
+ * redrew literally: a disc with eight radial rays. That reads as a sun, not as
+ * settings — every other row's glyph names its destination and this one named
+ * the wrong thing. Redrawn as the conventional cog, a toothed ring around a
+ * hub, inside the same `Mark` wrapper so it keeps the 16px box, the 1.5 stroke,
+ * `currentColor` and `aria-hidden` the other six carry.
+ */
 export function SettingsMark(props: ComponentProps<"svg">) {
   return (
     <Mark {...props}>
-      <circle cx="8" cy="8" r="2.25" />
-      <path d="M8 1.75v1.5M8 12.75v1.5M14.25 8h-1.5M3.25 8h-1.5M12.42 3.58l-1.06 1.06M4.64 11.36l-1.06 1.06M12.42 12.42l-1.06-1.06M4.64 4.64 3.58 3.58" />
+      <circle cx="8" cy="8" r="2.15" />
+      <path d="M8 1.4a1.05 1.05 0 0 1 1.05 1.05v.42c0 .43.26.81.65.98.4.16.85.08 1.16-.22l.3-.3a1.05 1.05 0 1 1 1.48 1.49l-.3.3c-.3.3-.39.75-.22 1.15.16.4.54.65.97.65h.46a1.05 1.05 0 0 1 0 2.1h-.42c-.43 0-.81.26-.98.65-.16.4-.08.85.22 1.16l.3.3a1.05 1.05 0 1 1-1.49 1.48l-.3-.3c-.3-.3-.75-.39-1.15-.22-.4.16-.65.54-.65.97v.46a1.05 1.05 0 0 1-2.1 0v-.42c0-.43-.26-.81-.65-.98-.4-.16-.85-.08-1.16.22l-.3.3a1.05 1.05 0 1 1-1.48-1.49l.3-.3c.3-.3.39-.75.22-1.15-.16-.4-.54-.65-.97-.65h-.46a1.05 1.05 0 0 1 0-2.1h.42c.43 0 .81-.26.98-.65.16-.4.08-.85-.22-1.16l-.3-.3a1.05 1.05 0 1 1 1.49-1.48l.3.3c.3.3.75.39 1.15.22h.08c.4-.16.65-.54.65-.97V2.45A1.05 1.05 0 0 1 8 1.4Z" />
     </Mark>
   );
 }

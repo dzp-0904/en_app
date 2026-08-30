@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/table";
 import { loadUserState } from "@/lib/onboarding";
 import { createClient } from "@/lib/supabase/server";
-import { loadTeacherClasses } from "@/lib/teacher";
+import { loadTeacherClassList } from "@/lib/teacher";
 import {
   PAYMENT_STATUS_LABELS,
   formatMoney,
@@ -72,7 +72,7 @@ export default async function TeacherTuitionPage() {
   }
 
   const supabase = await createClient();
-  const classes = await loadTeacherClasses(supabase, state.teacher.userId);
+  const classes = await loadTeacherClassList(supabase, state.teacher.userId);
 
   const records =
     classes === null ? null : await loadTeacherTuition(supabase, classes);
@@ -116,22 +116,26 @@ export default async function TeacherTuitionPage() {
         />
       ) : (
         <>
-          {/* The Figma's three cards. Every figure is a sum of `amount_total`
-              as stored — see `summarise` for why a waived row is counted as
-              expected but never as outstanding. */}
+          {/* The Figma's three cards: label above a bold, coloured number and
+              no tinted mark — the Dashboard's dotted tile is a different
+              object. Every figure is a sum of `amount_total` as stored — see
+              `summarise` for why a waived row is counted as expected but never
+              as outstanding. */}
           <div className="mb-8 grid gap-4 sm:grid-cols-3">
             <StatCard
-              tone="navy"
+              layout="label-first"
               label="Tổng học phí"
               value={formatMoney(summary.expected, summary.currency)}
             />
             <StatCard
-              tone="green"
+              layout="label-first"
+              valueTone="green"
               label="Đã thu"
               value={formatMoney(summary.collected, summary.currency)}
             />
             <StatCard
-              tone="orange"
+              layout="label-first"
+              valueTone="orange"
               label="Còn phải thu"
               value={formatMoney(summary.outstanding, summary.currency)}
             />

@@ -2,7 +2,7 @@ import "server-only";
 
 import type { Database } from "@/lib/database.types";
 import type { createClient } from "@/lib/supabase/server";
-import type { TeacherClass } from "@/lib/teacher";
+import type { TeacherClassFields } from "@/lib/teacher";
 import { formatZonedTime, zonedCalendarDate } from "@/lib/time";
 
 /**
@@ -163,7 +163,7 @@ export function todayIn(zone: string): string {
  * every real class in this product shares it — and the choice only affects
  * which column is marked as today, never which square a lesson lands in.
  */
-export function calendarZone(classes: TeacherClass[]): string {
+export function calendarZone(classes: TeacherClassFields[]): string {
   return classes[0]?.timezone ?? "Asia/Ho_Chi_Minh";
 }
 
@@ -191,7 +191,7 @@ function logDbError(
  */
 export async function loadTeacherWeek(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  classes: TeacherClass[],
+  classes: TeacherClassFields[],
   days: string[],
 ): Promise<CalendarSession[] | null> {
   if (classes.length === 0 || days.length === 0) return [];

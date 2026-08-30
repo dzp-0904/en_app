@@ -21,39 +21,81 @@ import { cn } from "@/lib/utils";
  * surface with `p-6` and a shadow, which is a different object — the stat tile
  * is 12px, unelevated, and tighter.
  *
- * `tone` is the Dashboard's variant of the same tile. Its four tiles are `p-5`
- * and carry an 8px tinted square above the number, holding a 10px dot in the
- * matching hue — a colour per statistic, not per value, so it says which tile
- * you are looking at rather than whether the number is good. It is optional
- * because the class-detail row above the roster has no such square, and both
- * are the Figma. The mark is `aria-hidden`: the label underneath already names
- * the statistic, and the colour carries nothing a reader would otherwise miss.
+ * THREE SHAPES, because the Figma draws three and they are not interchangeable.
+ *
+ *   1. Bare — the class-detail row above the roster. `p-4`, the value in
+ *      `text-xl font-semibold`, the label under it.
+ *   2. `tone` — the Dashboard's four tiles. `p-5`, an 8px tinted square above
+ *      the number holding a 10px dot in the matching hue, and the number a step
+ *      larger at `text-2xl`. The colour is per statistic, not per value: it
+ *      says which tile you are looking at, not whether the number is good.
+ *   3. `layout="label-first"` + `valueTone` — Tuition's three summary cards.
+ *      `p-5`, no square at all, the label *above* a `font-bold` number that
+ *      carries the colour itself. M22 rendered these as shape 2, which is why
+ *      "Tổng học phí" grew a near-black dot the Figma never draws.
+ *
+ * There is deliberately no `navy` tone. The Figma's tinted marks are only ever
+ * `#4466EE`, `#3BA876` and `#E8834A`; `#1B2036` appears in this family exactly
+ * once, as the *text* colour of Tuition's Total Expected, and that is shape 3.
+ *
+ * `valueTone` uses `green-dark`/`orange-dark` rather than the raw hues. At
+ * 20px bold the number is large text, and `--green` clears only 2.98:1 on white
+ * — the dark pair exists for precisely this and was introduced for the same
+ * reason on badges.
+ *
+ * The mark is `aria-hidden`: the label underneath already names the statistic,
+ * and the colour carries nothing a reader would otherwise miss.
  */
 
 const TONES = {
   primary: { tint: "bg-secondary", dot: "bg-primary" },
   green: { tint: "bg-green-light", dot: "bg-green" },
   orange: { tint: "bg-orange-light", dot: "bg-orange" },
-  navy: { tint: "bg-muted", dot: "bg-navy" },
+} as const;
+
+const VALUE_TONES = {
+  foreground: "text-foreground",
+  green: "text-green-dark",
+  orange: "text-orange-dark",
 } as const;
 
 function StatCard({
   label,
   value,
   tone,
+  valueTone,
+  layout = "value-first",
   className,
   ...props
 }: Omit<React.ComponentProps<"div">, "children"> & {
   label: React.ReactNode;
   value: React.ReactNode;
+  /** The Dashboard's tinted square and dot. Omit for the bare class-detail tile. */
   tone?: keyof typeof TONES;
+  /** Colours the number itself — Tuition's collected/outstanding pair. */
+  valueTone?: keyof typeof VALUE_TONES;
+  /** Tuition puts its label above the number; everything else puts it below. */
+  layout?: "value-first" | "label-first";
 }) {
+  const labelFirst = layout === "label-first";
+
+  const labelNode = (
+    <p
+      className={cn(
+        "text-xs text-muted-foreground",
+        labelFirst ? "mb-2" : "mt-0.5",
+      )}
+    >
+      {label}
+    </p>
+  );
+
   return (
     <div
       data-slot="stat-card"
       className={cn(
         "min-w-0 rounded-xl border border-border bg-card",
-        tone ? "p-5" : "p-4",
+        tone || labelFirst ? "p-5" : "p-4",
         className,
       )}
       {...props}
@@ -70,8 +112,20 @@ function StatCard({
         </span>
       ) : null}
 
-      <p className="truncate text-xl font-semibold text-foreground">{value}</p>
-      <p className="mt-0.5 text-xs text-muted-foreground">{label}</p>
+      {labelFirst ? labelNode : null}
+
+      <p
+        className={cn(
+          "truncate",
+          tone ? "text-2xl" : "text-xl",
+          labelFirst ? "font-bold" : "font-semibold",
+          VALUE_TONES[valueTone ?? "foreground"],
+        )}
+      >
+        {value}
+      </p>
+
+      {labelFirst ? null : labelNode}
     </div>
   );
 }

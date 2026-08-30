@@ -5,7 +5,7 @@ Read it in full before starting any milestone. Do not ask the user for anything
 that is already answered here, in the repository, in git history, or in the
 current milestone prompt.
 
-Last updated: 2026-08-30, after M22.
+Last updated: 2026-08-30, after M23.
 
 ---
 
@@ -92,12 +92,14 @@ SMTP secrets into the Docker image.
   errors to Vietnamese. Server-only, presentation-only.
 - `lib/mail/{mailer,invitation-email}.ts` — server-side SMTP only.
 
-### Client components — exactly five
+### Client components — exactly six
 
 Everything else is a Server Component. Do **not** add `"use client"` without a
 concrete interaction reason. M22 replaced `components/shell/nav-item.tsx` with
 `components/shell/nav.tsx` — one component marking the active row for seven nav
-entries instead of one per row — so the count did not change.
+entries instead of one per row — so the count did not change. M23 added the
+sixth, `components/ui/pending-bar.tsx`, which is client for one reason:
+`useLinkStatus()` is a hook and must be called by a descendant of `<Link>`.
 
 ```
 components/shell/nav.tsx
@@ -105,7 +107,11 @@ components/roster/tag-editor.tsx
 components/auth/submit-button.tsx
 components/onboarding/copy-field.tsx
 components/attendance/status-buttons.tsx
+components/ui/pending-bar.tsx
 ```
+
+Note that `components/student/band-progress.tsx` is a **Server** Component — a
+grep for `"use client"` false-positives on its JSDoc.
 
 State is **URL-driven** (query params + `<Link>`), which is what makes the
 application work with JavaScript disabled. Do not replace it with client state.
@@ -789,17 +795,124 @@ known gaps.
     writing `score_entries` into `IELTS Evening Group B`. It was deleted, its
     absence confirmed, and the tree rebuilt before the route count was read.
 
+### M23 — Final Figma fidelity, navigation performance and UX polish
+- **Audited** (Phase 1, before any edit): the complete Figma Make source again,
+  enumerated from `get_design_context` on node `0:1` rather than guessed —
+  `Layout.tsx`, `LoginPage`, `SignupPage`, `OnboardingPage`, `JoinPage`, the ten
+  teacher screens and the one student screen. **The file has no `Classes.tsx`**
+  (decision **T**): `/teacher/classes` has no design to be faithful to, which
+  retired the standing worry that its card was "richer than the Figma".
+- **The Settings icon (§2, mandatory).** `SettingsMark` was a disc with eight
+  radial rays — a **sun**. Redrawn as a **gear**: a toothed ring around a hub,
+  inside the same `Mark` wrapper, so it keeps the 16px box, `strokeWidth 1.5`,
+  `currentColor`, `aria-hidden` and `focusable="false"` the other six carry.
+  `lucide-react` is installed but imported **nowhere** in `app/`, `components/`
+  or `lib/` — the hand-drawn `Mark` set is the real icon system, so "prefer the
+  existing library" meant drawing it there.
+- **Six further visual defects found and fixed, all genuine M22 mismatches:**
+  1. `StatCard` carried an invented `navy` tone — a near-black dot the Figma
+     never draws. Removed (decision **S**).
+  2. Tuition's three summary cards were rendered as the Dashboard's dotted tile.
+     The Figma gives them no square, the label *above* the number, and the
+     colour on the number itself. Now `layout="label-first"` + `valueTone`.
+  3. `Card` carried `shadow-sm` unconditionally. The Figma uses a shadow
+     **once** in fifteen screens. Split into three variants (decision **R**).
+  4. List rows used the 16px radius; the Figma's list card is 12px — `list`.
+  5. The dashboard's per-student strip painted "stable" **indigo**; the Figma
+     paints `#E8E6DE`, the border grey, i.e. an *unfilled* segment. A student
+     with nothing to report was the most emphasised thing on the card.
+  6. The sidebar rendered `heading` as an uppercase line above the nav. The
+     Figma sets it as a 10px subtitle under the wordmark, with a rule closing
+     the logo block — now `LogoMark subtitle=`.
+- **The navigation delay: root cause, measured not guessed.** One warm Supabase
+  round trip on this hosted project is **~62-67 ms**. Every teacher list page
+  ran **six strictly sequential** trips — `auth.getUser()` → `profiles` →
+  `classes` probe → `classes` → `class_members` tally → the feature loader —
+  ≈400 ms, matching a measured 280-745 ms server render and 496-1024 ms from
+  click to content. And **nothing acknowledged the click** until the whole RSC
+  payload landed. Two fixes, both structural:
+  - **Fewer round trips.** `loadTeacherClasses` split into
+    `loadTeacherClassList` / `tallyClassMembers` / `withMemberCounts`: Lịch dạy,
+    Nhật ký buổi học, Báo cáo and Học phí were each paying for a
+    `class_members` read they discarded. `lib/dashboard.ts` folds the tally into
+    its existing `Promise.all` instead of running it ahead. `readUserState`
+    issues `profiles` and the teacher `classes` probe concurrently.
+    `loadStudentLessons` went from 3 sequential trips to 1 `Promise.all`.
+    `auth.getUser()` is **untouched** — it is the real Auth round trip that
+    gates writes.
+  - **`components/ui/pending-bar.tsx`** (the sixth client component) on `Nav`,
+    `Tabs` and `FilterPills`. `useLinkStatus()`, a 2px bar under the label while
+    the navigation is in flight (decision **U**).
+- **Deliberate non-changes, each argued:** no blanket `prefetch` on the sidebar
+  (7 dynamic per-teacher routes) or the filter pills (8+ variants) — it would
+  multiply Supabase reads for navigations that may never happen (§33); no
+  `loading.tsx` (on a same-route search-param change it blanks the filter row
+  too); no charting library; Calendar stays a seven-column agenda rather than
+  the Figma's absolutely-positioned 16h × 7d pixel canvas, which cannot meet
+  the zero-horizontal-scroll requirement at 320px; Reports keeps its honest
+  empty state rather than the Figma's mock-driven report card.
+- **Verified** against the production standalone build on `localhost:3000`:
+  - **Interaction:** 17 interactions measured. Click-to-feedback **1-2 ms on
+    every one** — before, there was no feedback of any kind until the content
+    landed. `url`/`selected` 334-595 ms. **Exactly one request per navigation
+    destination; no duplicate destination fetches.** The extra requests seen are
+    prefetches: M19's deliberate class-detail tab prefetch multiplies with the
+    filter in the href, and `/sessions/<id>` / `/sessions/new` were each
+    prefetched twice under different `_rsc` hashes. Left in place — §4 of this
+    file requires preserving that prefetch — and reported as a measured cost.
+  - **Responsive:** 8 teacher list pages, 7 class-detail routes, 5 anonymous
+    pages and 3 student routes × 6 widths (1280/1024/768/390/360/320) = **138
+    page-width combinations, zero page-level horizontal scroll.** Clipping only
+    in the two by-design cases (`sr-only`, the invite `<code>`).
+  - **Accessibility:** 20 pages, **0 problems.** One `h1` each; one
+    `aria-current="page"` per labelled landmark; zero nameless controls, zero
+    unlabelled inputs, zero duplicate ids, zero exposed avatars, zero exposed
+    pending bars. The gear stays accessible — the SVG is `aria-hidden` and
+    "Cài đặt" names the link.
+  - **No-JS:** 15 teacher + 3 student pages render with h1, seven nav links,
+    breadcrumb links and forms. **`pendingBars=0` on every page** — the bar
+    renders nothing without JS and cannot break the no-JS path. The teacher
+    lesson page still emits its **four** attendance submit buttons (M12 intact).
+  - **History:** deep links work, refresh preserves the filter, Back ×2 and
+    Forward restore the correct selected pill. `?student=` opens the panel;
+    Close preserves `filter=stable` **and** the roster anchor. Stale and
+    malformed `?student=` still give the Vietnamese alert, not a 404.
+  - **Security:** `git diff --stat` on `components/attendance/`,
+    `app/teacher/[classId]/actions.ts`, `app/auth/actions.ts`, `supabase/`,
+    `proxy.ts` and `lib/supabase/` is **empty**. `useFormStatus` still at
+    `components/attendance/status-buttons.tsx:46`. The student account is
+    redirected to `/student` from **all 11** teacher routes.
+  - **Console:** 19 pages, **0 errors and 0 warnings** — no hydration errors,
+    no React errors, no duplicate keys.
+  - `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ · **25 routes**.
+- **Limitations:**
+  - `tuition_records` is empty in production, so the new `label-first` card
+    shape is verified by type-check and code review, **not screenshotted** —
+    seeing it populated would require writing production data.
+  - The attendance and score **write** paths were again not exercised, for the
+    same reason. Every action file and `status-buttons.tsx` are untouched by
+    M23; M12/M13 coverage plus the no-JS render of the four buttons is what
+    stands behind them.
+  - The prefetch duplication above is a real, measured cost that M23 chose not
+    to remove because §4 forbids touching that prefetch.
+  - Millisecond figures are from in-page instrumentation on this machine
+    against a hosted Supabase project. They are reproducible in kind — six
+    sequential round trips versus fewer — but the absolute numbers move with
+    network latency and are not a benchmark.
+
 ## 14. Current project state (verified 2026-08-30)
 
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `16bad2c` — "feat: reconstruct the full Figma UI", followed by the
-  memory commit that records it |
-| `origin/main` | `ad4ed65` — **M22 is committed locally and NOT pushed** |
+| HEAD | `__M23_HASH__` — "fix: polish navigation performance and UI (M23)" |
+| `origin/main` | `7449ef8` — **M22 IS pushed; M23 is committed locally and NOT
+  pushed.** The M22-era note here saying `ad4ed65` / "not pushed" was stale:
+  the user pushed M22 between sessions. |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
 | Working tree | **clean** |
-| Routes | **25** (24 `page.tsx` + `app/auth/callback/route.ts`) |
+| Routes | **25** (24 `page.tsx` + `app/auth/callback/route.ts`) — unchanged by
+  M23, which added no route |
 | Migrations | 15, unchanged since the database foundation commit |
 | RLS | enabled + FORCEd on 13 tables |
 | Gates | `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ |
@@ -876,6 +989,25 @@ Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
   button that does nothing.
 - **Q.** No charting library. The Figma's recharts graphs are rendered as
   lists and rails over the same real rows (decision **E**).
+- **R.** `Card` has three variants and they are not decoration: `default`
+  (`rounded-2xl p-6`, flat) is the in-app surface, `elevated` adds the
+  `shadow-sm` the Figma uses **exactly once** in fifteen screens — the
+  standalone card floating on a bare field: onboarding, login, signup, join —
+  and `list` (`rounded-xl p-5`, flat) is a row in a list. Do not restore a
+  blanket `shadow-sm`; every in-app card in the design is flat.
+- **S.** `StatCard` has three shapes: bare (class detail), `tone` (the
+  Dashboard's tinted square + dot), and `layout="label-first"` + `valueTone`
+  (Tuition). There is deliberately **no `navy` tone** — the Figma's tinted
+  marks are only `#4466EE`, `#3BA876`, `#E8834A`. `valueTone` uses
+  `green-dark`/`orange-dark` because `--green` is 2.98:1 on white.
+- **T.** The Figma has **no `Classes.tsx`**. `/teacher/classes` has no design to
+  be faithful to; it is `Dashboard.tsx`'s class card, elaborated. Do not
+  "restore fidelity" to a screen that does not exist.
+- **U.** Click feedback is `PendingBar` (`useLinkStatus`), never an optimistic
+  selection. It claims nothing: it does not move `aria-current`, does not
+  restyle the pill as chosen, and renders nothing without JavaScript. Do not
+  replace it with `loading.tsx` on a search-param route — that blanks the
+  filter row along with the content.
 
 Additional standing constraints from the user, still in force:
 

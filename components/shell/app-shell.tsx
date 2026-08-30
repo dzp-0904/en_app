@@ -126,15 +126,22 @@ export function AppShell({
           "lg:sticky lg:top-0 lg:h-dvh lg:w-60 lg:flex-col lg:flex-nowrap lg:items-stretch lg:gap-0 lg:self-start lg:overflow-y-auto lg:border-r lg:border-b-0 lg:px-5 lg:py-6",
         )}
       >
-        <LogoMark size="sm" className="mr-auto lg:mr-0" />
+        {/* The Figma closes its logo block with a rule before the navigation
+            starts. Wide only: on a narrow screen the brand and the sections
+            share one line, so a divider between them would cut the bar in
+            half. */}
+        <LogoMark
+          size="sm"
+          subtitle={heading}
+          className="mr-auto lg:mr-0 lg:w-full lg:border-b lg:border-border lg:pb-5"
+        />
 
         <Nav
           entries={items}
           root={root}
           fallback={fallback}
           label="Điều hướng chính"
-          heading={heading}
-          className="lg:mt-9 lg:w-full"
+          className="lg:mt-5 lg:w-full"
         />
 
         <div className="flex w-full items-center justify-between gap-3 border-t border-border pt-3 lg:mt-auto lg:block lg:pt-5">

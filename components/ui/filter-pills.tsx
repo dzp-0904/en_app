@@ -2,6 +2,7 @@ import * as React from "react";
 import Link from "next/link";
 
 import { cn } from "@/lib/utils";
+import { PendingBar } from "@/components/ui/pending-bar";
 
 /**
  * The Figma's filter row, from the class roster: `px-3 py-1 text-xs
@@ -51,13 +52,14 @@ function FilterPills({
               href={item.href}
               aria-current={item.current ? "page" : undefined}
               className={cn(
-                "block rounded-full px-3 py-1 text-xs font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                "relative block rounded-full px-3 py-1 text-xs font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
                 item.current
                   ? "bg-primary text-primary-foreground"
                   : "border border-border bg-card text-muted-foreground hover:border-primary/30 hover:text-foreground",
               )}
             >
               {item.label}
+              <PendingBar />
             </Link>
           </li>
         ))}

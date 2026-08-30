@@ -24,7 +24,7 @@ import {
 } from "@/lib/lesson-logs";
 import { loadUserState } from "@/lib/onboarding";
 import { createClient } from "@/lib/supabase/server";
-import { isUuid, loadTeacherClasses } from "@/lib/teacher";
+import { isUuid, loadTeacherClassList } from "@/lib/teacher";
 
 export const metadata: Metadata = {
   title: "Nhật ký buổi học",
@@ -117,7 +117,7 @@ export default async function TeacherLessonLogsPage({
   }
 
   const supabase = await createClient();
-  const classes = await loadTeacherClasses(supabase, state.teacher.userId);
+  const classes = await loadTeacherClassList(supabase, state.teacher.userId);
 
   const params = await searchParams;
 
@@ -218,7 +218,7 @@ export default async function TeacherLessonLogsPage({
             <ul className="space-y-3">
               {logs.map((log) => (
                 <li key={log.logId}>
-                  <Card className="p-5">
+                  <Card variant="list">
                     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
                       <div className="min-w-0 grow basis-64">
                         <p className="text-xs text-muted-foreground">

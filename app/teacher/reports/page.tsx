@@ -16,7 +16,7 @@ import {
   loadTeacherReports,
 } from "@/lib/reports";
 import { createClient } from "@/lib/supabase/server";
-import { loadTeacherClasses } from "@/lib/teacher";
+import { loadTeacherClassList } from "@/lib/teacher";
 
 export const metadata: Metadata = {
   title: "Báo cáo",
@@ -69,7 +69,7 @@ export default async function TeacherReportsPage() {
   }
 
   const supabase = await createClient();
-  const classes = await loadTeacherClasses(supabase, state.teacher.userId);
+  const classes = await loadTeacherClassList(supabase, state.teacher.userId);
 
   const reports =
     classes === null ? null : await loadTeacherReports(supabase, classes);
@@ -113,7 +113,7 @@ export default async function TeacherReportsPage() {
         <ul className="space-y-3">
           {reports.map((report) => (
             <li key={report.reportId}>
-              <Card className="p-5">
+              <Card variant="list">
                 <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
                   <div className="min-w-0 grow basis-64">
                     <p className="text-xs text-muted-foreground">
