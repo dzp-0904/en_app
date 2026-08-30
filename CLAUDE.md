@@ -794,7 +794,7 @@ known gaps.
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `__HEAD__` — "feat: reconstruct the full Figma UI" |
+| HEAD | `16bad2c` — "feat: reconstruct the full Figma UI" |
 | `origin/main` | `24ed32b` — **M22 is committed locally and NOT pushed** |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
 | Working tree | **clean** |
