@@ -5,7 +5,7 @@ Read it in full before starting any milestone. Do not ask the user for anything
 that is already answered here, in the repository, in git history, or in the
 current milestone prompt.
 
-Last updated: 2026-08-31, after M25.
+Last updated: 2026-08-31, after M26.
 
 ---
 
@@ -115,6 +115,13 @@ components/ui/pending-tint.tsx
 M25 added `components/calendar/week-grid.tsx` and it is a **Server**
 Component too: the week comes from the URL and `now` is read once per request,
 so nothing on it reacts to anything. The count is still six.
+
+M26 added four more — `components/shell/student-shell.tsx`,
+`components/student/score-trend.tsx`, `components/student/homework-list.tsx`,
+`components/student/feedback-panels.tsx` — and **every one of them is a Server
+Component**. The chart is an inline SVG computed from props; the lists are
+markup over rows; the shell is a bar with one `signOut` form in it. The count is
+**still six**.
 
 Note that `components/student/band-progress.tsx` is a **Server** Component — a
 grep for `"use client"` false-positives on its JSDoc.
@@ -1161,18 +1168,145 @@ known gaps.
     the four buttons is what stands behind them.
   - `tuition_records` and `monthly_reports` are still empty in production.
 
-## 14. Current project state (verified 2026-08-31, after M25)
+### M26 — `ab02598` student UI rebuilt from the Figma source
+- **Audited first, the whole student experience and not one node.** The Make
+  source was re-enumerated from `get_design_context` on node `0:1`. The finding
+  that shaped everything: **the Figma has exactly one student screen**,
+  `src/pages/student/Dashboard.tsx`, and `src/App.tsx` renders
+  `{view === "student-dashboard" && <StudentDashboard />}` **outside**
+  `<Layout>`. The student's chrome in the design is a **top bar**, not the
+  teacher sidebar. M22 shipped the sidebar for both roles and recorded it as a
+  known deviation; M26 corrects it.
+- **Screen inventory and mapping** — the design's one screen is *class-scoped*
+  (greeting, band hero, tabs, all of it about `mockClasses[0]`), so it maps onto
+  `/student/[classId]`. `/student` and the student lesson page have **no Figma
+  design at all**; neither was deleted and neither was invented — both are built
+  from the design's own vocabulary, exactly as decision **T** already answered
+  for `/teacher/classes`.
+- **Implemented** — 6 files changed, 4 new, 0 new dependencies, **0 new client
+  components**, 0 shared primitives touched:
+  - `components/shell/student-shell.tsx` (new, Server): the Figma's top bar —
+    `LogoMark size="sm"` linking home, name and email right-aligned, the 32px
+    initials `Avatar`, and the `signOut` form as a ghost button — over the same
+    centred column. `AppShell` now branches on `role` at its head and its `NAV`
+    table is typed `Record<"teacher", …>`: there is no student row left to
+    accidentally render.
+  - `/student/[classId]` **is** the Figma's student Dashboard: breadcrumb,
+    `Chào <tên> 👋`, the class·course and teacher meta line, the navy
+    `BandProgress` hero, then `Tabs variant="primary"` — a primitive M22 built
+    for this screen and never used — over four panels.
+  - `components/student/score-trend.tsx` (new): the Figma's recharts
+    "Score Over Time" as a hand-authored inline SVG polyline over real
+    `score_entries`, with a `?skill=` chip row. Decision **Q** kept, the page
+    kept on the server, and it renders with JavaScript off.
+  - `components/student/homework-list.tsx` (new) + `loadStudentHomework` in
+    `lib/student.ts`: the Homework tab over real `homework_assignments`
+    embedding this member's `homework_submissions`. **Read-only** — submitting
+    is `public.submit_homework()`'s job.
+  - `components/student/feedback-panels.tsx` (new): `RecentFeedback` (the
+    Progress tab's two most recent) and `LearningHistory` (the History tab's
+    full list), both over real `lesson_logs`.
+  - `/student`, the student lesson page and the segment's `not-found.tsx` moved
+    to the `4xl` centred column and the `list` card; the lesson page's three
+    uppercase `text-xs` eyebrows became real `h2`s via `SectionHeading`.
+- **Four tabs, not three** (decision **Y**). Tiến bộ / Bài tập / Lịch sử are the
+  Figma's, in its order; **Buổi học** is appended because M12's attendance view
+  and the lesson list have no equivalent in the mock and deleting a working
+  feature to match a screenshot is not fidelity. They are `<Link>`s over
+  `?tab=`, and **deliberately not prefetched**: every tab's loader is gated on
+  the tab being rendered, so prefetching would issue all four queries on every
+  visit. `PendingTint` acknowledges the click instead — measured **1-2 ms**.
+- **Data and security, unchanged.** The membership is read first and alone;
+  everything after it is one `Promise.all` whose members are chosen by the tab.
+  Every loader takes `membershipId` from that answer, never from the URL. **Zero
+  migrations, RLS, RPC, grant, schema or auth changes.** `git diff` is empty for
+  `components/attendance/`, every `actions.ts`, `supabase/`, `proxy.ts`,
+  `lib/supabase/`, all of `app/teacher/`, `components/calendar/`,
+  `components/ui/`, `components/icons/` and `components/shell/nav.tsx`;
+  `useFormStatus` is still at `components/attendance/status-buttons.tsx:46`.
+- **Verified** against the production standalone build on `localhost:3000`:
+  - **Responsive:** 8 student paths × 6 widths (1280/1024/768/390/360/320) =
+    **48 combinations, zero page-level horizontal scroll and zero clipping.**
+    The chart's own region measures `scrollWidth === clientWidth` at 1280/1024
+    and scrolls inside its card at 768 (297 client / 360 content) and below.
+  - **Accessibility: 0 problems** on all 8 student screens — exactly one `h1`,
+    zero duplicate ids, zero nameless controls, zero unlabelled inputs, zero
+    exposed avatars, and one `aria-current` per labelled landmark
+    (`Đường dẫn:page`, `Các mục của lớp học:page`, `Kỹ năng:page`). Every
+    breadcrumb terminates on the current page (decision **M**). Focus rings
+    measured `solid 2px` on the tabs, the skill chips, the brand link and the
+    sign-out button (decision **V**).
+  - **Console: 0 errors, 0 warnings** across all 8 screens and 6 widths.
+  - **No-JS** (`Emulation.setScriptExecutionDisabled`): 7 pages render with
+    `h1`, four tab links, five skill links, the breadcrumb links and the
+    sign-out form; **`animate-pulse` count is 0 everywhere**.
+  - **History and params:** deep links to all four tabs and to `?skill=`;
+    refresh; Back ×2 and Forward restore the right tab *and* the right skill in
+    a clean tab. `?tab=bogus` and `?skill=bogus` both fall back to Tiến bộ /
+    Tổng thể rather than erroring.
+  - **Security:** the student account is redirected to `/student` from **all 12**
+    teacher routes; a foreign class id, a foreign session id and a non-uuid all
+    give the styled Vietnamese 404, never a different answer from each other;
+    the teacher account is redirected to `/teacher` from all three student
+    routes; anonymous hits on `/student`, `/student/<id>`, `/teacher` and
+    `/onboarding` all 307 to `/auth/login`.
+  - **Teacher regression:** all 14 teacher paths render with their `h1` and the
+    seven nav links, and the teacher lesson page still emits its **four**
+    attendance submit buttons (M12 intact).
+  - **English-string sweep** of the rendered text on all 8 student screens: the
+    only English is user data — the class name, the teacher's name, the lesson
+    title, the teacher's note, `schedule_note` — plus `EduTrack` and `IELTS`,
+    which §3 keeps as-is.
+  - `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ · **25 routes**, no
+    debug or preview route.
+  - Diff: **6 files changed, 649 insertions(+), 461 deletions(-)** plus 4 new
+    files totalling 745 lines.
+- **Intentional deviations from the Figma, each argued in JSDoc:**
+  - **No charting library.** The Figma's recharts `LineChart` is a hand-authored
+    inline SVG. Decision **Q**, and it keeps the page a Server Component.
+  - **A fourth tab**, as above.
+  - **Four homework states, not two.** The mock colours everything from one
+    `submitted` boolean; `public.homework_status` is
+    `assigned | submitted | graded | missed` and only `graded` carries a score.
+  - **No `lucide-react` icons.** The design's `TrendingUp`/`Award`/`BookOpen`
+    have no counterpart in this repository's hand-drawn `Mark` set and the
+    student screens need none; `lucide-react` is still imported nowhere.
+  - **The chart scrolls inside its card below 360px** rather than scaling its
+    10px axis labels to ~5px — the `components/ui/table.tsx` / M25 treatment.
+  - `#4A5170` rather than the design's lighter grey for small type, the
+    repository's documented AA substitution.
+- **Limitations:**
+  - This student has **zero `score_entries`** and **zero homework rows** in
+    production, so the chart's populated state, the four homework tones and the
+    graded score line were verified on a **temporary `app/m26-preview` route**
+    with synthetic props rather than production writes. The route was deleted,
+    its absence confirmed, and the tree rebuilt before the route count was read
+    (decision **J**).
+  - The band hero therefore also renders only its empty state — `—` with no
+    rail, which is `band-progress.tsx`'s deliberate M22 behaviour: drawing an
+    empty rail would assert 0% progress, which is false. That file is untouched.
+  - "A student cannot see a classmate's data" still cannot be exercised
+    **empirically** — the one class has one member and creating a second is a
+    production write. It rests on the student SELECT policies and on every
+    loader taking `membershipId` from the session.
+  - The attendance and score **write** paths were again not exercised. Every
+    action file is untouched by M26; M12/M13 coverage plus the no-JS render of
+    the four buttons is what stands behind them.
+
+## 14. Current project state (verified 2026-08-31, after M26)
 
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `31451df` — "feat: rebuild the teacher calendar as the Figma time grid (M25)" |
-| `origin/main` | `cedf66d` — M23. **M24 and M25 are committed locally and NOT
-  pushed.** |
+| HEAD | **this commit** — "docs: record M26 in project memory" (a commit cannot record its own hash; `git log -1` is authoritative) |
+| Feature commit | `ab02598` — "feat: rebuild the student UI from the Figma source (M26)" |
+| `origin/main` | `384ee8a` — "docs: record M25 in project memory". **M24 and
+  M25 ARE pushed** — an earlier revision of this file claimed otherwise and was
+  wrong; M26's two commits are local and **NOT** pushed. |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
 | Working tree | **clean** |
 | Routes | **25** (24 `page.tsx` + `app/auth/callback/route.ts`) — unchanged by
-  M24 and M25, neither of which added a route |
+  M24, M25 or M26, none of which added a route |
 | Migrations | 15, unchanged since the database foundation commit |
 | RLS | enabled + FORCEd on 13 tables |
 | Gates | `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ |
@@ -1207,8 +1341,9 @@ not from a single averaged "one round trip" figure.
 /teacher/[classId]/edit                        .../edit/page.tsx
 /teacher/[classId]/sessions/new                .../sessions/new/page.tsx
 /teacher/[classId]/sessions/[sessionId]        .../sessions/[sessionId]/page.tsx
-/student                                       app/student/page.tsx
-/student/[classId]                             app/student/[classId]/page.tsx
+/student                                       app/student/page.tsx                  (class chooser)
+/student/[classId]                             app/student/[classId]/page.tsx        (the Figma student dashboard;
+                                                                                      tabs: ?tab=homework|history|lessons, ?skill=)
 /student/[classId]/sessions/[sessionId]        .../sessions/[sessionId]/page.tsx
 ```
 
@@ -1297,6 +1432,31 @@ Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
   artefact of its `h-full overflow-hidden` shell, and starting at 06:00 in a
   product whose classes meet in the evening would hide every real lesson on
   load, in a screenshot, and without JavaScript.
+
+- **X.** The student's chrome is the Figma's **top bar**
+  (`components/shell/student-shell.tsx`), not the teacher sidebar. The design
+  renders its student screen outside `<Layout>`, and M22's shared sidebar was a
+  recorded deviation, not a decision. `AppShell` branches on `role` and its
+  `NAV` table is typed `Record<"teacher", …>` so no student row can creep back
+  in. Do not give the student a sidebar, and do not invent student nav sections
+  — the design has exactly one student screen.
+- **Y.** `/student/[classId]` **is** the Figma's student Dashboard, and it has
+  **four** tabs: the design's Tiến bộ / Bài tập / Lịch sử in its order, plus
+  **Buổi học**. The fourth exists because M12's attendance view and the lesson
+  list have no equivalent in a mock whose student is hard-coded into one class;
+  removing a working feature to match a screenshot is not fidelity (§1 of the
+  brief: "Do not remove existing functionality merely because it is not visible
+  in one screenshot"). The tabs are `<Link>`s over `?tab=` and are **not
+  prefetched** — each tab's loader is gated on that tab being rendered, so a
+  prefetch would issue all four queries on every visit. `/student` is the class
+  chooser the design has no screen for; decision **T** governs it.
+- **Z.** The student score chart is a **hand-authored inline SVG**
+  (`components/student/score-trend.tsx`), never a charting dependency —
+  decision **Q**, applied to the one place the Figma actually draws a graph. It
+  stays a Server Component, renders with JavaScript off, and below 360px it
+  **scrolls inside its own labelled `overflow-x-auto` region** rather than
+  scaling 10px axis labels into illegibility: the `components/ui/table.tsx` /
+  M25 treatment, and the reason the page still never scrolls sideways.
 
 Additional standing constraints from the user, still in force:
 
