@@ -5,7 +5,7 @@ Read it in full before starting any milestone. Do not ask the user for anything
 that is already answered here, in the repository, in git history, or in the
 current milestone prompt.
 
-Last updated: 2026-08-30, after M24.
+Last updated: 2026-08-31, after M25.
 
 ---
 
@@ -111,6 +111,10 @@ components/onboarding/copy-field.tsx
 components/attendance/status-buttons.tsx
 components/ui/pending-tint.tsx
 ```
+
+M25 added `components/calendar/week-grid.tsx` and it is a **Server**
+Component too: the week comes from the URL and `now` is read once per request,
+so nothing on it reacts to anything. The count is still six.
 
 Note that `components/student/band-progress.tsx` is a **Server** Component — a
 grep for `"use client"` false-positives on its JSDoc.
@@ -478,6 +482,11 @@ Tested widths: **1280, 768, 390, 360, 320**.
 - Meaningful text must not be clipped.
 - Internal table scrolling is acceptable where already designed
   (`components/ui/table.tsx` wraps tables in an `overflow-x: auto` scroller).
+  M25 applied the same treatment to the calendar: `week-grid.tsx` keeps a
+  `min-width` of 672px (56px gutter + 7×88px) inside a labelled, focusable
+  `overflow-x-auto` region. It fits without scrolling at 768/1024/1280 and
+  scrolls **inside the card** at 390/360/320. The page still never scrolls
+  sideways at any width.
 
 Testing note: `documentElement.scrollWidth` is **unreliable** when a `<table>`
 sits inside an `overflow-x:auto` scroller. The authoritative test is
@@ -1020,18 +1029,150 @@ known gaps.
   - Millisecond figures are in-page and Node instrumentation on this machine
     against a hosted Supabase project. Reproducible in kind, not a benchmark.
 
-## 14. Current project state (verified 2026-08-30, after M24)
+### M25 — `31451df` teacher Calendar rebuilt as the Figma time grid
+- **Audited first.** The Figma Make source was re-enumerated from
+  `get_design_context` on node `0:1` and `src/pages/teacher/Calendar.tsx` read
+  verbatim rather than inferred. Its geometry is now copied exactly:
+  `HOUR_START = 6`, `HOUR_END = 22`, `SLOT_HEIGHT = 64`,
+  `grid-cols-[56px_repeat(7,1fr)]`, solid hour rules and dashed half-hour rules
+  on `#F0EFE9`, separators on `#E8E6DE`, today's column washed `#EDF0FF`, the
+  day number in a 28px disc that fills `#4466EE` with white 14px/600 text, and
+  a 1px `#4466EE` current-time line with an 8px dot on its left end.
+- **The M22/M23 "no pixel canvas" argument was reversed, and the reversal is
+  the milestone** (decision **W**). The old page drew seven day cards because
+  absolute positions cannot reflow at 320px. True — but the grid does not have
+  to reflow, it has to *scroll*, and this repository already ships that
+  treatment in `components/ui/table.tsx`. The page overflows at no width; the
+  grid does, inside its own labelled region.
+- **Implemented** — 2 files changed, 1 new, 0 new dependencies, 0 new client
+  components:
+  - `components/calendar/week-grid.tsx` (new, **Server** Component): the day
+    heading row, the 56px time gutter, one rules overlay drawn once across all
+    seven columns rather than seven times down each, the today tint, the
+    current-time indicator, and each lesson as an absolutely positioned block
+    **inside its own day cell** — `inset-x-0.5` plus `top`/`height`, so no
+    `calc((100% - 56px)/7)` percentage arithmetic can round a block into the
+    wrong column. Block content is the Figma's: class name (11px semibold,
+    truncated), `HH:mm–HH:mm` (10px), and — only above the Figma's own 56px
+    threshold — `"{n} học viên · IELTS 6.5"`, or `"Đã hủy"` when cancelled.
+  - `lib/calendar.ts`: `HOUR_START`/`HOUR_END`/`SLOT_HEIGHT`, `WEEKDAY_SHORT`
+    (`T2`…`T7`/`CN` — Vietnamese numbers its weekdays, and two characters is
+    what keeps a column narrow), `minutesOfDay`, `nowIn`, `gridRange`,
+    `dayNumber`, and `startMinutes`/`endMinutes` on `CalendarSession`.
+  - `app/teacher/calendar/page.tsx`: the Figma header — month under the title,
+    class legend, `Hôm nay`, and the joined ← / → pair sharing one rounded
+    outline — plus the grid. Its JSDoc, which used to argue *against* the pixel
+    canvas, was rewritten to record why that argument was wrong.
+- **Data and architecture, unchanged.** `TeacherContext.classes` still supplies
+  the class list (M24's read is not undone and no second `classes` query was
+  added); the week and the roster tally are issued in **one `Promise.all`**, so
+  the student count costs no extra wall-clock; `auth.getUser()` is untouched.
+  **Zero** migrations, RLS, RPC, schema, grant or auth changes. `git diff` is
+  empty for `components/attendance/`, every `actions.ts`, `supabase/`,
+  `proxy.ts` and `lib/supabase/`; `useFormStatus` is still at
+  `components/attendance/status-buttons.tsx:46`.
+- **Class colours reuse `CLASS_TONES`** (`primary`/`green`/`orange`/`navy`,
+  indexed by the class's position in the teacher's own list) — deterministic
+  across weeks, refreshes and return visits, and already the convention. The
+  fourth tone stays `navy` rather than the Figma's `#8B5CF6`: there is no
+  purple token and adding one is a palette change outside M25's scope.
+- **Verified** against the production standalone build on `localhost:3000`:
+  - **Geometry measured live, not eyeballed:** body 1024px = 16 × 64, gutter
+    56px, row pitch 64px, 16 solid + 16 dashed rules, card `rounded-2xl` on
+    `#E8E6DE`, rules `#F0EFE9`, today header `#EDF0FF`, disc 28×28 `#4466EE`
+    white 14px/600, column tint `#EDF0FF`/30%, now-dot 8×8 and now-line 1px
+    `#4466EE`.
+  - **Block placement, on the one real session** (`IELTS Evening Group B`,
+    2026-08-29, 12:01–16:07, Asia/Ho_Chi_Minh): column T7 at `left 982`,
+    `top 601`, `height 258` — the arithmetic predicts 601 and 258 exactly.
+    Background `#EDF0FF`, 3px `#4466EE` left border, 8px radius, tab-reachable,
+    click navigates to the session with feedback at 2 ms.
+  - **Timezone**, exercised against the real `lib/time.ts` from Node: seven
+    instants including 17:00Z (→ 00:00 the *next* local day, minute 0), 16:59Z
+    (→ 23:59, minute 1439), 2026-12-31T17:30Z (→ **2027**-01-01 00:30) and a
+    `America/Los_Angeles` case that lands on the previous day. Four of the
+    seven differ from `toISOString().slice(0, 10)`, which is the bug this
+    avoids.
+  - **Week navigation and labels:** current / prev / next / Hôm nay; month
+    boundary "Tháng 08–09/2026"; year boundary "Tháng 12/2026 – 01/2027";
+    `?week=not-a-date` and `?week=2026-13-99` both fall back to the current
+    week. Deep link, refresh, Back ×2 and Forward all restore the right week in
+    a clean tab. (A tab reused for hundreds of probe navigations saturates
+    Chrome's 50-entry history and produces misleading jumps — instrument
+    artefact, not a defect.)
+  - **Responsive:** 10 teacher paths (including three calendar weeks), 2
+    student paths × 6 widths (1280/1024/768/390/360/320) — **0 page-level
+    horizontal scroll**. The grid's own region measures `scrollWidth ===
+    clientWidth` at 768/1024/1280 and 672 vs 324/294/254 at 390/360/320.
+  - **Accessibility: 0 problems** on 9 teacher pages — one `h1`, zero nameless
+    controls, zero unlabelled inputs, zero duplicate ids, zero exposed avatars,
+    and one `aria-current` per labelled landmark. The today column is
+    `aria-current="date"` inside the grid region, a different token from the
+    `page` markers, so it cannot collide with them. Tabbing the calendar gives
+    `outline-style: solid`, 2px, on **every** control (decision **V** honoured
+    on the new ones; the joined arrows and the grid region use `-2px` offset so
+    `overflow-hidden` cannot clip the ring).
+  - **No-JS:** 8 pages render with h1, seven nav links, breadcrumbs, week
+    links and the lesson block as a real `<a href>`; `animate-pulse` count is
+    **0** everywhere. The teacher lesson page still emits its **four**
+    attendance submit buttons (M12 intact).
+  - **Console: 0 errors, 0 warnings** across 10 pages.
+  - **Security:** the student account is redirected to `/student` from **all 10**
+    teacher routes probed including both calendar URLs; anonymous hits on
+    `/teacher/calendar`, `/teacher` and `/student` all redirect to
+    `/auth/login`.
+  - **M24 click feedback intact:** Tuần sau 3 ms → 217 ms, Tuần trước 2 ms →
+    260 ms, Hôm nay 2 ms, lesson block 2 ms → 695 ms.
+  - `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ · **25 routes**, no
+    debug or preview route.
+- **Intentional deviations from the Figma, each argued in JSDoc:**
+  - **No internal vertical scroller.** The Figma's grid is `flex-1` inside an
+    `h-full overflow-hidden` shell, so its own scrollbar is a consequence of
+    that shell. Reproducing it would nest a scroller inside a scrolling
+    document *and* — since the first visible hour is 06:00 and this product's
+    classes meet in the evening — start every real lesson hidden, with no way
+    to auto-scroll from a server component. The whole day is drawn and the page
+    scrolls as every other page does.
+  - **Horizontal scroll below 768px** instead of the Figma's fixed canvas.
+  - **`navy` instead of `#8B5CF6`** as the fourth class colour.
+  - **`#4A5170` instead of `#8A8FA8`** for the hour, weekday and legend text —
+    the repository's documented AA substitution; 10px `#8A8FA8` fails contrast.
+  - **24-hour `HH:mm`** instead of "7:30 PM", per §7.
+  - **An empty week still renders the grid**, with "Tuần này chưa có buổi học
+    nào" as a second `meta` line in the header rather than an `EmptyState`
+    replacing the calendar. A calendar that vanishes when nothing is booked is
+    not a calendar. The no-classes-at-all `EmptyState` is unchanged.
+  - The Figma builds its week by regex-parsing each class's free-text
+    `schedule` string into synthetic 90-minute slots. This product reads real
+    `class_sessions` rows — decision **B**, and it predates M25.
+- **Limitations:**
+  - Production has exactly **one** session in range, so multi-class colouring,
+    overlapping blocks, the sub-56px block (no third line) and `gridRange`'s
+    widening past 06:00–22:00 are **code-reviewed and type-checked, not
+    screenshotted**. Creating a second session is a production write.
+  - A session close to midnight UTC could not be *rendered* for the same
+    reason; the conversion beneath it was exercised directly against
+    `lib/time.ts` from Node, which is where the risk actually lives.
+  - The grid region is a tab stop at every width, including those where it does
+    not scroll. That is the `components/ui/table.tsx` precedent, kept for
+    consistency.
+  - The attendance and score **write** paths were again not exercised. Every
+    action file is untouched by M25; M12/M13 coverage plus the no-JS render of
+    the four buttons is what stands behind them.
+  - `tuition_records` and `monthly_reports` are still empty in production.
+
+## 14. Current project state (verified 2026-08-31, after M25)
 
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `98de694` — "perf: cut authenticated round trips and fix nav feedback (M24)" |
-| `origin/main` | `cedf66d` — **M23 IS pushed** (the earlier note claiming it was
-  local-only was stale). **M24 is committed locally and NOT pushed.** |
+| HEAD | `31451df` — "feat: rebuild the teacher calendar as the Figma time grid (M25)" |
+| `origin/main` | `cedf66d` — M23. **M24 and M25 are committed locally and NOT
+  pushed.** |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
 | Working tree | **clean** |
 | Routes | **25** (24 `page.tsx` + `app/auth/callback/route.ts`) — unchanged by
-  M24, which added no route |
+  M24 and M25, neither of which added a route |
 | Migrations | 15, unchanged since the database foundation commit |
 | RLS | enabled + FORCEd on 13 tables |
 | Gates | `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ |
@@ -1142,6 +1283,20 @@ Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
   too. This is why every focusable control in the app carries the trio
   `focus-visible:outline-solid focus-visible:outline-2
   focus-visible:outline-offset-2`.
+
+- **W.** The teacher Calendar **is** the Figma's weekly time grid — a
+  `grid-cols-[56px_repeat(7,1fr)]` canvas, 64px an hour from 06:00 to 22:00,
+  with each lesson absolutely positioned by its start minute and as tall as it
+  lasts. M22/M23's "a pixel canvas cannot meet zero horizontal scroll at 320px"
+  is **superseded**: it does not reflow, it scrolls, inside its own labelled
+  `overflow-x-auto` region with a 672px `min-width` — the `table.tsx`
+  treatment. Do not put the seven day cards back. The window widens via
+  `gridRange` when a real lesson falls outside 06:00–22:00 and is **never**
+  narrowed, because a block positioned off the grid is a lesson silently lost.
+  There is deliberately **no internal vertical scroller**: the Figma's is an
+  artefact of its `h-full overflow-hidden` shell, and starting at 06:00 in a
+  product whose classes meet in the evening would hide every real lesson on
+  load, in a screenshot, and without JavaScript.
 
 Additional standing constraints from the user, still in force:
 
