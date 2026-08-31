@@ -5,7 +5,7 @@ Read it in full before starting any milestone. Do not ask the user for anything
 that is already answered here, in the repository, in git history, or in the
 current milestone prompt.
 
-Last updated: 2026-08-31, after M26.
+Last updated: 2026-08-31, after M27 (M27 is UNCOMMITTED — in the working tree).
 
 ---
 
@@ -91,6 +91,17 @@ SMTP secrets into the Docker image.
 - `lib/auth-messages.ts` — added in M20; maps Supabase/GoTrue English provider
   errors to Vietnamese. Server-only, presentation-only.
 - `lib/mail/{mailer,invitation-email}.ts` — server-side SMTP only.
+- `lib/monthly-report.ts` — added in M27. `loadMonthlyStudentReport` (the one
+  canonical report loader, decision **AA**) and `loadMonthlyClassSummary`.
+- `lib/report-period.ts` — `MonthKey`, `parseMonth`, `currentMonth`,
+  `monthLabel`, `monthRange`, `shiftMonth`, all on the class's timezone.
+- `lib/report-text.ts` — the report's shared presentation vocabulary, so the
+  preview and the three export formats word the same fact the same way.
+- `lib/export/{blocks,report-document,pdf,docx,xlsx,zip}.ts` — server-only
+  document generation. `zip.ts` writes OOXML containers with Node's own `zlib`;
+  only the PDF has dependencies (decision **AC**).
+- `assets/fonts/` — two Public Sans TTFs + `OFL.txt`, read at request time by
+  the PDF route and traced into the standalone build by `next.config.ts`.
 
 ### Client components — exactly six
 
@@ -122,6 +133,12 @@ M26 added four more — `components/shell/student-shell.tsx`,
 Component**. The chart is an inline SVG computed from props; the lists are
 markup over rows; the shell is a bar with one `signOut` form in it. The count is
 **still six**.
+
+M27 added four more — `components/report/report-preview.tsx`,
+`report-hero.tsx`, `skill-radar.tsx` and `score-lines.tsx` — and **every one of
+them is a Server Component** too. Both charts are inline SVG computed from
+props, which is what lets them appear in the exported PDF and with JavaScript
+off. The count is **still six**.
 
 Note that `components/student/band-progress.tsx` is a **Server** Component — a
 grep for `"use client"` false-positives on its JSDoc.
@@ -1293,22 +1310,190 @@ known gaps.
     action file is untouched by M26; M12/M13 coverage plus the no-JS render of
     the four buttons is what stands behind them.
 
-## 14. Current project state (verified 2026-08-31, after M26)
+### M27 — monthly progress reports and export (**uncommitted**, in the working tree)
+- **Audited first, as §1 of the brief required, before any edit.** The Figma
+  Make source's `src/pages/teacher/Reports.tsx` is a **single-student,
+  parent-facing report card**: a student `<select>`, "Download PDF" / "Share
+  with Parent", a navy identity header, an "IELTS Progress" rail with four skill
+  deltas, a recharts `RadarChart` of the four skills, three "Learning Habits"
+  rails, a recharts `LineChart` of scores, a green "Improvements This Month", an
+  orange "Areas to Improve", a "Teacher's Comment", and a "Next Month Focus"
+  triple that merely repeats Areas to Improve.
+- **The brief's premise about missing data was wrong again, and the schema won**
+  (decision **B**). Every table the report needs already exists with the teacher
+  policy `class_id = any(app.my_class_ids())`, and
+  `v_member_session_attendance`'s own migration comment names monthly reports as
+  an intended consumer. **Zero migrations, zero RLS/RPC/grant/schema changes.**
+  `monthly_reports` is **read** (for `teacher_comment` and the published list),
+  never written — no fake rows were created to make the UI work.
+- **Five Figma items are not populatable and were not faked** (decision **P**):
+  the two invented "improvement" bullets, the templated teacher comment, the
+  hardcoded `"8.1/10"` homework average, the duplicated "Next Month Focus"
+  triple, and "Share with Parent" — which has no share flow behind it here
+  (`create_report_share_link` exists but M27 does not expose it), so nothing is
+  rendered for it rather than a button that does nothing.
+- **Implemented — 2 files changed, 12 new, 2 dependencies, 1 new route, 0 new
+  client components:**
+  - **One route, two views.** `/teacher/reports` takes `?class=&month=&student=`.
+    Without `student` it is the class index — month header, class `FilterPills`
+    (only when the teacher has more than one class), a roster list of
+    `StudentRow`s carrying current band / target band / attendance / lessons in
+    the month, the class-wide "Tải Excel cả lớp" button, and the M22 published
+    `monthly_reports` list. With `student` it is the report preview. **No new
+    page route was added** — the only new route is the export Route Handler.
+  - **`lib/monthly-report.ts`** — the single canonical loader
+    `loadMonthlyStudentReport(...)` (§10) plus `loadMonthlyClassSummary(...)`.
+    The Web preview, PDF, DOCX and XLSX all read the same `MonthlyStudentReport`
+    value, so the four cannot disagree. Membership is resolved first and alone;
+    everything after it is one `Promise.all`. Every query is scoped in the
+    database (`eq`/`in` on ids the session owns), never fetched wide and
+    filtered in application code.
+  - **`lib/report-period.ts`** — `MonthKey`, `parseMonth`, `currentMonth`,
+    `monthLabel`, `monthRange`, `shiftMonth`. Month boundaries are computed on
+    the **class's** timezone through `lib/time.ts` (§7); there is no
+    `toISOString().slice(0, 10)` anywhere in M27, which is exactly the bug that
+    would move an evening lesson on the 1st or the 31st into the wrong month.
+  - **`lib/report-text.ts`** — the shared presentation vocabulary (`bandText`,
+    `dayText`, `courseLabel`, `statusLabel`, `homeworkScoreText`, …) so the four
+    outputs word the same fact the same way.
+  - **`components/report/`** — `report-preview.tsx` (the composition, nine
+    sections in the document's order), `report-hero.tsx` (the navy identity
+    card and the IELTS Progress rail), `skill-radar.tsx` (the `RadarChart` as
+    inline SVG), `score-lines.tsx` (the `LineChart` as inline SVG). **All four
+    are Server Components** — the six client components are untouched.
+  - **`lib/export/`** — `blocks.ts` (the `Block` document model),
+    `report-document.ts` (one `MonthlyStudentReport` → one `Block[]`), `pdf.ts`,
+    `docx.ts`, `xlsx.ts`, `zip.ts`. PDF and DOCX render the **same** `Block[]`,
+    so a section cannot be present in one and missing from the other.
+  - **`app/teacher/reports/export/route.ts`** — a Route Handler, deliberately
+    not a Server Action, so every export control is a plain `<a href>` that
+    works with JavaScript disabled. `?format=pdf|docx|xlsx`, with `student`
+    omitted meaning the class workbook. A non-teacher, a foreign class, a stale
+    membership, a missing `student` for a per-student format and an unknown
+    format are all **404**, identical to each other.
+  - **`next.config.ts`** — `outputFileTracingIncludes` for
+    `/teacher/reports/export`, because the PDF route's font path is assembled at
+    runtime and is therefore invisible to Next's tracer. Without it the route
+    builds and works in `dev` and then throws ENOENT in `standalone`.
+- **Two dependencies, both argued before installing** (§7, decision **E**):
+  **`pdf-lib`** and **`@pdf-lib/fontkit`**, plus two bundled Public Sans TTFs
+  under `assets/fonts/`. The reason is Vietnamese: the PDF standard-14 fonts are
+  WinAnsi and physically cannot draw `ố`, `ệ` or `ữ`, so a dependency-free PDF
+  would have produced a report with the student's own language missing.
+  fontkit subsets the face into a `Type0` / `Identity-H` / `CIDFontType2` font
+  with a `ToUnicode` CMap, which is also what makes the output selectable and
+  searchable rather than a picture of text. **DOCX and XLSX needed no
+  dependency at all** — Node 24 ships `zlib.crc32` and `deflateRawSync`, so
+  `lib/export/zip.ts` writes the OOXML containers directly. **No charting
+  library, no AI SDK, no icon library** was added, and `lucide-react` is still
+  imported nowhere.
+- **Deliberate deviations from the Figma, each argued in JSDoc:**
+  - **No recharts.** Both graphs are hand-authored inline SVG — decisions **Q**
+    and **Z** — which keeps the preview a Server Component and, more to the
+    point, makes the charts appear in the PDF and with JavaScript off. A report
+    is a document; a blank rectangle where the skills should be is not a
+    degraded experience, it is a wrong document.
+  - **The radar draws no polygon unless all four skills are measured**, and
+    nothing at all when none are: `public.band` starts at 0.0, which is a real
+    and very bad mark, so a missing skill cannot be plotted as zero and half a
+    shape would read as a profile.
+  - **The student `<select>` is a roster list of links**, not a dropdown — the
+    URL is the state (§1) and it must work without JavaScript.
+  - **Four homework states**, not the mock's one `submitted` boolean.
+  - `#4A5170` for small grey type, the repository's documented AA substitution.
+- **Verified against the production standalone build on `localhost:3000`:**
+  - **Exports are real files, inspected programmatically, not trusted on a 200.**
+    PDF: `%PDF-1.7`, ends `%%EOF`, 2 pages, 8/8 streams inflated, two `ToUnicode`
+    CMaps (71 and 54 entries), **1687 characters decoded back out of the content
+    streams**, and all ten probed Vietnamese strings present. DOCX: five parts,
+    every section heading, `w:tblHeader` on the table headers, 4 tables / 61
+    paragraphs, `w:outlineLvl` twice in `styles.xml` so Word's navigation pane
+    works, `pStyle` Title/Subtitle/Heading1. Student XLSX: four sheets
+    **Tổng quan | Buổi học | Điểm số | Bài tập**, `inlineStr`, `autoFilter`,
+    frozen header row. Class XLSX: **Học viên | Thông tin**, filterable and
+    sortable. All four re-downloaded from the final build and confirmed
+    **byte-identical** to the inspected copies.
+  - **Responsive:** 5 paths × 6 widths (1280/1024/768/390/360/320) — **zero
+    page-level horizontal scroll, zero clipping.** The `Band theo kỹ năng` table
+    measures 409/409 at 1280 and scrolls **inside its own labelled region**
+    (255/204) at 320. The calendar's region is unchanged (968/968 → 672/254).
+  - **Accessibility: 0 problems.** Exactly one `h1` on every view, zero
+    duplicate ids, zero nameless controls, zero unlabelled inputs, and one
+    `aria-current` per labelled landmark. Focus rings measured **`solid 2px` on
+    all 15 controls** across both views — the month arrows, "Tháng này", the
+    roster rows, the class-wide Excel button and all three export anchors
+    (decision **V**).
+  - **No-JS** (`Emulation.setScriptExecutionDisabled`): both views render with
+    their `h1`, seven nav links, breadcrumbs, the month links and **all three
+    export anchors as real `href`s**; `animate-pulse` count is **0**.
+  - **Malformed input:** `class=not-a-uuid`, a foreign class uuid,
+    `month=2026-13`, `month=hello` and `student=nope` all fall back silently to
+    the teacher's own class and the class's current month; a **stale or foreign
+    `student=` renders the Vietnamese alert, not a 404** (the M19 precedent).
+  - **Security:** the student account is redirected to `/student` from
+    `/teacher/reports` and gets **404** from `/teacher/reports/export` for both
+    the per-student and the class format; anonymous requests **redirect to
+    `/auth/login`** on the page and on the export route; a foreign class, a
+    non-uuid class, a stale membership, a missing `student` and
+    `format=exe` are each **404** and indistinguishable from one another.
+  - **Regression:** 16 teacher paths render with one `h1` and seven nav links;
+    the teacher lesson page still emits its **four** attendance submit buttons
+    (M12 intact); `useFormStatus` is still at
+    `components/attendance/status-buttons.tsx:46`; `git diff` is **empty** for
+    `components/attendance/`, every `actions.ts`, `supabase/`, `proxy.ts` and
+    `lib/supabase/`; `/student` still redirects a teacher to `/teacher`.
+  - **Console: 0 errors, 0 warnings** across 16 teacher paths and 6 widths.
+  - `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ · **26 routes**
+    (24 `page.tsx` + 2 `route.ts`), no debug or preview route.
+- **Limitations:**
+  - **The one production student has zero `score_entries`, zero bands and zero
+    homework rows**, so the report was verified in its honest empty states: the
+    radar prints its "chưa ghi nhận band" sentence, `ScoreLines` returns `null`
+    (a single point is not a trend, and two are needed for a line), and the
+    homework section says so. The **populated** branches — the radar polygon,
+    the five score series, the four homework tones, the band-movement box — are
+    type-checked and code-reviewed, **not screenshotted**. Creating that data is
+    a production write, which §18 forbids. **No preview route was created this
+    time** and none exists in the tree.
+  - **`Chuyên cần` is "—" for August 2026** even though the class has one
+    session that month with attendance "Có mặt" recorded. That is
+    `v_member_session_attendance`'s own definition, not a bug in M27, and §6's
+    rule stands: do not re-derive standing in page code. It is reported rather
+    than worked around.
+  - `monthly_reports` is still empty in production, so the published-report list
+    and the `teacher_comment` block were seen only in their empty states.
+  - The attendance and score **write** paths were again not exercised. Every
+    action file is untouched by M27; M12/M13 coverage plus the no-JS render of
+    the four buttons is what stands behind them.
+  - Class-wide **PDF/DOCX** was not built: the Figma's class-level artefact is a
+    table, so the class export is the XLSX the brief asked to be filterable and
+    sortable. Per-student PDF/DOCX covers the parent-facing case.
+  - **NO COMMIT WAS CREATED.** M27 lives entirely in the working tree.
+
+## 14. Current project state (verified 2026-08-31, after M27)
 
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | **this commit** — "docs: record M26 in project memory" (a commit cannot record its own hash; `git log -1` is authoritative) |
-| Feature commit | `ab02598` — "feat: rebuild the student UI from the Figma source (M26)" |
-| `origin/main` | `384ee8a` — "docs: record M25 in project memory". **M24 and
-  M25 ARE pushed** — an earlier revision of this file claimed otherwise and was
-  wrong; M26's two commits are local and **NOT** pushed. |
+| HEAD | `11e2645` — "docs: record M26 in project memory" |
+| `origin/main` | `11e2645`. **Everything through M26 is pushed** — an earlier
+  revision of this file claimed M26's commits were local, and that is now stale. |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
-| Working tree | **clean** |
-| Routes | **25** (24 `page.tsx` + `app/auth/callback/route.ts`) — unchanged by
-  M24, M25 or M26, none of which added a route |
+| Working tree | **NOT clean — M27 is uncommitted, by instruction.** `2` modified
+  source files (`app/teacher/reports/page.tsx`, `next.config.ts`), `package.json`
+  + `package-lock.json` for the two new dependencies, and `12` new files
+  (`app/teacher/reports/export/route.ts`, `assets/fonts/` ×3,
+  `components/report/` ×4, `lib/export/` ×6 — see §13 M27) plus this file. |
+| Routes | **26** (24 `page.tsx` + 2 `route.ts`: `app/auth/callback/route.ts` and
+  M27's `app/teacher/reports/export/route.ts`) |
 | Migrations | 15, unchanged since the database foundation commit |
 | RLS | enabled + FORCEd on 13 tables |
+| Client components | still **six** — M27 added four `components/report/*` and
+  all four are Server Components |
+| Shared primitives | still **19** — M27 added none and changed none |
+| Dependencies | M27 added `pdf-lib` and `@pdf-lib/fontkit` (PDF only; DOCX and
+  XLSX use Node's own `zlib`). Still no i18n library, no charting library, no AI
+  SDK; `lucide-react` is installed and imported nowhere. |
 | Gates | `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ |
 
 **Measured hop costs against this hosted Supabase project** (from Node, outside
@@ -1334,6 +1519,7 @@ not from a single averaged "one round trip" figure.
 /teacher/calendar                              app/teacher/calendar/page.tsx         (?week=YYYY-MM-DD)
 /teacher/lesson-logs                           app/teacher/lesson-logs/page.tsx      (?class= &skill=)
 /teacher/reports                               app/teacher/reports/page.tsx
+/teacher/reports/export                        app/teacher/reports/export/route.ts   (?class= &month= &student= &format=pdf|docx|xlsx)
 /teacher/tuition                               app/teacher/tuition/page.tsx
 /teacher/settings                              app/teacher/settings/page.tsx
 /teacher/new                                   app/teacher/new/page.tsx
@@ -1457,6 +1643,51 @@ Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
   **scrolls inside its own labelled `overflow-x-auto` region** rather than
   scaling 10px axis labels into illegibility: the `components/ui/table.tsx` /
   M25 treatment, and the reason the page still never scrolls sideways.
+
+- **AA.** The monthly report has **one canonical loader**,
+  `loadMonthlyStudentReport` in `lib/monthly-report.ts`, and the Web preview,
+  the PDF, the DOCX and the XLSX all render that one `MonthlyStudentReport`
+  value. PDF and DOCX go further and share a single `Block[]` document
+  (`lib/export/blocks.ts` + `report-document.ts`), so a section cannot exist in
+  one file and be missing from the other. Never add a second query path for an
+  export format: a parent holding a PDF that disagrees with the teacher's screen
+  is the one failure this whole feature cannot survive.
+- **AB.** Exports are a **Route Handler** (`app/teacher/reports/export/route.ts`),
+  not a Server Action, because that makes every export control a plain
+  `<a href download>` that works with JavaScript disabled — §12's requirement
+  applied to a document, not just a page. The handler re-derives identity from
+  the session and answers **404** to every refusal it can make: not a teacher,
+  a class the teacher does not own, a membership not in that class, a
+  per-student format with no `student`, and an unknown `format`. They are
+  deliberately indistinguishable, so a 404 says nothing about who exists.
+- **AC.** `pdf-lib` + `@pdf-lib/fontkit` + two bundled Public Sans TTFs are the
+  **only** dependencies M27 added, and the reason is Vietnamese, not
+  convenience: the PDF standard-14 fonts are WinAnsi and cannot draw `ố`, `ệ` or
+  `ữ`, so the dependency-free PDF would have shipped a report with the language
+  removed. fontkit subsets the face to `Type0` / `Identity-H` / `CIDFontType2`
+  with a `ToUnicode` CMap, which is also what makes the text selectable and
+  searchable rather than a picture. **DOCX and XLSX add nothing** — Node's
+  `zlib.crc32` + `deflateRawSync` write the OOXML containers in
+  `lib/export/zip.ts`. Do not add a document or spreadsheet library on top of
+  that, and do not add a charting library for the two report graphs
+  (decisions **Q**/**Z** — they are inline SVG, which is also why they appear
+  in the PDF and with JavaScript off).
+- **AD.** The report month is a **calendar month on the class's timezone**,
+  resolved through `lib/report-period.ts` over `lib/time.ts`. `?month=` is
+  `YYYY-MM`; anything unparseable falls back to the class's own current month
+  rather than erroring, and "Tháng này" **drops** the parameter so the fallback
+  recomputes it. A UTC slice would move an evening lesson on the 1st or the
+  31st into the wrong month, which in a parent-facing document is a lie about
+  when a child was taught.
+- **AE.** Nothing in the report is generated, averaged or inferred. Standing
+  comes from `v_member_performance_status`, current band from
+  `v_member_current_band`, attendance from `v_member_session_attendance`, and
+  the teacher's comment from `monthly_reports.teacher_comment` — read, never
+  written. The Figma's invented improvement bullets, its templated comment, its
+  hardcoded `"8.1/10"`, its duplicated "Next Month Focus" and its "Share with
+  Parent" button have no data behind them and are therefore **absent**, not
+  approximated (decision **P**). There is no LLM, no AI API and no summarizer
+  anywhere in this feature.
 
 Additional standing constraints from the user, still in force:
 
