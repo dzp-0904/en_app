@@ -48,6 +48,21 @@ export type CalendarSession = {
   /** `HH:mm` in the class's zone. */
   startTime: string;
   endTime: string;
+  /**
+   * Minutes past midnight on the class's own clock — where in the day column
+   * the block starts, and how tall it is.
+   *
+   * Derived from `startTime`/`endTime` rather than from the instant, so the
+   * offset and the printed time can never disagree: both are the same wall
+   * clock, read once through `lib/time.ts`.
+   */
+  startMinutes: number;
+  /**
+   * Exclusive, and clamped to midnight. A lesson that runs past midnight ends
+   * on the next calendar square, and its block stops at the bottom of this one
+   * rather than wrapping into a day it does not belong to.
+   */
+  endMinutes: number;
   /** The raw instant, kept for ordering across zones. */
   startsAt: string;
 };
@@ -79,6 +94,17 @@ export const TONE_DOT: Record<ClassTone, string> = {
   navy: "bg-navy",
 };
 
+/**
+ * The time grid's geometry, exactly as `pages/teacher/Calendar.tsx` sets it:
+ * `HOUR_START = 6`, `HOUR_END = 22`, `SLOT_HEIGHT = 64` — a sixteen-hour day at
+ * 64px an hour, with the hour rule solid and the half-hour rule dashed.
+ *
+ * These are a floor and a ceiling rather than a fixed window; see `gridRange`.
+ */
+export const HOUR_START = 6;
+export const HOUR_END = 22;
+export const SLOT_HEIGHT = 64;
+
 /** Weekday names, Monday first — the week Vietnamese calendars start on. */
 export const WEEKDAY_LABELS = [
   "Thứ Hai",
@@ -88,6 +114,25 @@ export const WEEKDAY_LABELS = [
   "Thứ Sáu",
   "Thứ Bảy",
   "Chủ Nhật",
+] as const;
+
+/**
+ * The same seven days as they are written at the top of a Vietnamese calendar.
+ *
+ * The Figma prints "MON"…"SUN". Vietnamese numbers its weekdays rather than
+ * naming them, and "T2"…"T7" / "CN" is the form every printed calendar,
+ * timetable and phone in the country uses — it is also two characters, which is
+ * what lets a day column stay narrow. The full name is still carried by each
+ * column's accessible label.
+ */
+export const WEEKDAY_SHORT = [
+  "T2",
+  "T3",
+  "T4",
+  "T5",
+  "T6",
+  "T7",
+  "CN",
 ] as const;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -149,9 +194,62 @@ export function shiftWeek(monday: string, weeks: number): string {
   return squareToIso(squareOf(monday) + weeks * 7 * DAY);
 }
 
+/**
+ * `HH:mm` as minutes past midnight.
+ *
+ * `% 24` because `Intl` renders midnight as "24:00" under an h24 locale and as
+ * "00:00" under h23, and which one a runtime picks for `vi-VN` is not something
+ * to bet a lesson's position on.
+ */
+export function minutesOfDay(time: string): number {
+  const [hour, minute] = time.split(":").map(Number);
+  return (hour % 24) * 60 + minute;
+}
+
 /** Today, on the clock the classes actually meet on. */
 export function todayIn(zone: string): string {
   return zonedCalendarDate(zone, new Date().toISOString());
+}
+
+/**
+ * Now, on that same clock: which square today is, and how far into it we are.
+ *
+ * Both halves come from `lib/time.ts` against one instant, which is what keeps
+ * the highlighted column and the current-time line from disagreeing across a
+ * midnight boundary. Read once per request on the server — the line marks when
+ * the page was rendered, exactly as the Figma's own `new Date()` does.
+ */
+export function nowIn(zone: string): { date: string; minutes: number } {
+  const instant = new Date().toISOString();
+  return {
+    date: zonedCalendarDate(zone, instant),
+    minutes: minutesOfDay(formatZonedTime(zone, instant)),
+  };
+}
+
+/**
+ * The hours the grid spans.
+ *
+ * The Figma's window is 06:00–22:00 and that is the floor and the ceiling here.
+ * It is widened — never narrowed — when a real lesson falls outside it: a block
+ * positioned off the grid would simply not be drawn, and a calendar that
+ * silently omits a lesson is a worse object than a calendar that is taller.
+ * Every class in this product meets inside the Figma's window, so in practice
+ * the returned range is the Figma's.
+ */
+export function gridRange(sessions: CalendarSession[]): {
+  startHour: number;
+  endHour: number;
+} {
+  let startHour = HOUR_START;
+  let endHour = HOUR_END;
+
+  for (const session of sessions) {
+    startHour = Math.min(startHour, Math.floor(session.startMinutes / 60));
+    endHour = Math.max(endHour, Math.ceil(session.endMinutes / 60));
+  }
+
+  return { startHour, endHour: Math.max(endHour, startHour + 1) };
 }
 
 /**
@@ -229,6 +327,11 @@ export async function loadTeacherWeek(
     const date = zonedCalendarDate(owner.timezone, session.starts_at);
     if (!wanted.has(date)) continue;
 
+    const startTime = formatZonedTime(owner.timezone, session.starts_at);
+    const endTime = formatZonedTime(owner.timezone, session.ends_at);
+    const startMinutes = minutesOfDay(startTime);
+    const rawEnd = minutesOfDay(endTime);
+
     placed.push({
       sessionId: session.id,
       classId: session.class_id,
@@ -236,8 +339,13 @@ export async function loadTeacherWeek(
       title: session.title,
       status: session.status,
       date,
-      startTime: formatZonedTime(owner.timezone, session.starts_at),
-      endTime: formatZonedTime(owner.timezone, session.ends_at),
+      startTime,
+      endTime,
+      startMinutes,
+      // Anything that does not run forwards inside this square ran past
+      // midnight. `class_sessions_ends_after_starts` guarantees the instants
+      // are ordered, so this is the only case that can produce it.
+      endMinutes: rawEnd > startMinutes ? rawEnd : 24 * 60,
       startsAt: session.starts_at,
     });
   }
@@ -263,8 +371,13 @@ export function weekLabel(days: string[]): string {
   );
 }
 
-/** `dd/MM` — the number under each weekday heading. */
+/** `dd/MM` — the date spoken in a column's accessible label. */
 export function dayLabel(isoDate: string): string {
   const [, month, day] = isoDate.split("-");
   return day + "/" + month;
+}
+
+/** The bare day of the month, which is all the Figma's column heading prints. */
+export function dayNumber(isoDate: string): string {
+  return String(Number(isoDate.split("-")[2]));
 }
