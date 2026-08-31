@@ -828,3 +828,101 @@ export async function loadStudentScoreHistory(
     recordedOn: entry.recorded_on,
   }));
 }
+
+/** The four states `public.homework_status` allows, in display order. */
+export type HomeworkStatus = "assigned" | "submitted" | "graded" | "missed";
+
+export const HOMEWORK_STATUS_LABELS: Record<HomeworkStatus, string> = {
+  assigned: "Chưa nộp",
+  submitted: "Đã nộp",
+  graded: "Đã chấm",
+  missed: "Quá hạn",
+};
+
+export type StudentHomework = {
+  assignmentId: string;
+  title: string;
+  description: string | null;
+  skill: Skill;
+  dueDate: string | null;
+  maxScore: number;
+  /**
+   * `null` when no `homework_submissions` row exists for this member yet.
+   * The schema allows it: a submission row is created alongside the
+   * assignment in the normal flow, but the assignment is the parent and can
+   * outlive or precede its children. An unmatched assignment is still
+   * assigned work, so it is shown as `assigned` rather than dropped.
+   */
+  status: HomeworkStatus | null;
+  score: number | null;
+  submittedAt: string | null;
+  teacherFeedback: string | null;
+};
+
+/**
+ * The homework this class has set, with this student's own row against each.
+ *
+ * The Figma's "Homework" tab. Both tables have existed since the foundation
+ * commit and both grant the student SELECT through a policy of their own —
+ * `homework_assignments_student_select` scopes the parent to
+ * `app.my_student_class_ids()` and `homework_submissions_student_select` scopes
+ * the child to `app.my_member_ids()` — so this is a real read of real rows, not
+ * a screen invented around a table that does not exist.
+ *
+ * ONE ROUND TRIP, AND THE EMBED IS FILTERED TWICE. The submission is embedded
+ * rather than fetched separately, and the embedded filter names this student's
+ * membership explicitly even though `homework_submissions_student_select`
+ * already restricts the join to their own rows. The policy is what makes a
+ * classmate's submission unreachable; the filter is what makes the intent
+ * readable here, and the same belt-and-braces `loadStudentClasses` uses.
+ *
+ * READ-ONLY. There is no write path in this module and none on the page: a
+ * student submits through `public.submit_homework()`, which is an RPC precisely
+ * because column-level grants cannot stop a student who holds UPDATE on
+ * `status` from also holding it on `score`. Nothing here calls it — this
+ * milestone reproduces the Figma's list, which has no submit control either.
+ *
+ * `null` means the query failed; `[]` means no homework has been set.
+ */
+export async function loadStudentHomework(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+  membershipId: string,
+): Promise<StudentHomework[] | null> {
+  const { data, error } = await supabase
+    .from("homework_assignments")
+    .select(
+      "id, title, description, skill, due_date, max_score, assigned_on, homework_submissions(status, score, submitted_at, teacher_feedback)",
+    )
+    .eq("class_id", classId)
+    .eq("homework_submissions.class_member_id", membershipId)
+    // Undated work last: a deadline is the thing the list is read for, and
+    // `due_date` is nullable.
+    .order("due_date", { ascending: true, nullsFirst: false })
+    .order("assigned_on", { ascending: false });
+
+  if (error) {
+    console.error("[student] failed to load homework", {
+      code: error.code,
+      message: error.message,
+    });
+    return null;
+  }
+
+  return (data ?? []).map((row) => {
+    const mine = row.homework_submissions?.[0] ?? null;
+
+    return {
+      assignmentId: row.id,
+      title: row.title,
+      description: row.description,
+      skill: row.skill,
+      dueDate: row.due_date,
+      maxScore: row.max_score,
+      status: mine?.status ?? null,
+      score: mine?.score ?? null,
+      submittedAt: mine?.submitted_at ?? null,
+      teacherFeedback: mine?.teacher_feedback ?? null,
+    };
+  });
+}

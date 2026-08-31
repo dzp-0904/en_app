@@ -12,6 +12,7 @@ import {
   TuitionMark,
 } from "@/components/icons/nav-marks";
 import { Nav, type NavEntry } from "@/components/shell/nav";
+import { StudentShell } from "@/components/shell/student-shell";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -56,13 +57,14 @@ export type ShellRole = "teacher" | "student";
  * also why `fallback` exists: `/teacher/new` and `/teacher/<class id>` belong
  * with "Lớp học" rather than with the dashboard they sit under.
  *
- * The student's navigation stays one row. The Figma has exactly one student
+ * There is no student row here any more. The Figma has exactly one student
  * screen and does not put it in this shell at all — it draws a top bar over a
- * centred column — so there is no second student section to reproduce, and
- * inventing one would be inventing a feature.
+ * centred column — which M22 recorded as a known deviation and M26 corrects:
+ * `role="student"` now renders `components/shell/student-shell.tsx` instead.
+ * This table is the teacher's navigation and nothing else.
  */
 const NAV: Record<
-  ShellRole,
+  "teacher",
   {
     heading: string;
     root: string;
@@ -88,11 +90,6 @@ const NAV: Record<
       { href: "/teacher/settings", label: "Cài đặt", icon: <SettingsMark /> },
     ],
   },
-  student: {
-    heading: "Dành cho học viên",
-    root: "/student",
-    items: [{ href: "/student", label: "Lớp học", icon: <ClassesMark /> }],
-  },
 };
 
 export function AppShell({
@@ -106,7 +103,17 @@ export function AppShell({
   email: string | null;
   children: ReactNode;
 }) {
-  const { heading, root, fallback, items } = NAV[role];
+  // Two different chromes, because the design has two. See the note above
+  // `NAV` and the one on `StudentShell` itself.
+  if (role === "student") {
+    return (
+      <StudentShell fullName={fullName} email={email}>
+        {children}
+      </StudentShell>
+    );
+  }
+
+  const { heading, root, fallback, items } = NAV.teacher;
 
   return (
     <div className="flex flex-1 flex-col lg:flex-row">

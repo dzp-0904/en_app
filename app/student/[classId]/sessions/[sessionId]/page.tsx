@@ -6,6 +6,7 @@ import { Alert } from "@/components/ui/alert";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageShell } from "@/components/ui/page-shell";
+import { SectionHeading } from "@/components/ui/section-heading";
 import { ATTENDANCE_LABELS } from "@/lib/attendance";
 import { PERFORMANCE_LABELS, SKILL_LABELS } from "@/lib/lesson-log";
 import { loadUserState } from "@/lib/onboarding";
@@ -74,6 +75,19 @@ export const metadata: Metadata = {
  *
  * Four reads: the membership, the lesson, this student's mark, this student's
  * notes. None of them is per note.
+ *
+ * ## Shape
+ *
+ * The Figma has no student lesson screen — its student is hard-coded into one
+ * class and its History tab is as far as a single lesson gets — so this page is
+ * built out of the design's own vocabulary rather than "restored" to a mock
+ * that does not exist: the `4xl` centred column every other student screen
+ * uses, `PageHeader` with the trail, `SectionHeading` for each block, and the
+ * `list` card the design gives a row. The uppercase `text-xs` eyebrows this
+ * page used to head its three sections with were field labels doing a
+ * heading's job, which left the document with one heading and several styled
+ * paragraphs; `SectionHeading` renders a real `h2`, which is what a screen
+ * reader navigates by.
  */
 export default async function StudentLessonPage({
   params,
@@ -200,11 +214,9 @@ export default async function StudentLessonPage({
         </p>
       ) : null}
 
-      <h2 className="mt-4 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Điểm danh của tôi
-      </h2>
+      <SectionHeading title="Điểm danh của tôi" />
 
-      <Card>
+      <Card variant="list">
         {/* A cancelled lesson carries no attendance line for the reason the
             class list gives: attendance at a lesson that did not happen is not
             a fact about the student, and `v_member_session_attendance` excludes
@@ -228,9 +240,7 @@ export default async function StudentLessonPage({
 
       {banded ? (
         <>
-          <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Band điểm của tôi
-          </h2>
+          <SectionHeading title="Band điểm của tôi" className="mt-10" />
 
           {entries === null ? (
             // Not "nothing was recorded": the query failed, and the two must
@@ -239,7 +249,7 @@ export default async function StudentLessonPage({
               Chúng tôi chưa tải được band điểm của bạn. Vui lòng tải lại trang.
             </Alert>
           ) : entries.length === 0 ? (
-            <Card>
+            <Card variant="list">
               <p className="text-sm text-muted-foreground">
                 Chưa ghi nhận band nào cho buổi học này.
               </p>
@@ -248,7 +258,7 @@ export default async function StudentLessonPage({
             <ul className="space-y-3">
               {entries.map((entry) => (
                 <li key={entry.entryId}>
-                  <Card>
+                  <Card variant="list">
                     <Entry entry={entry} />
                   </Card>
                 </li>
@@ -258,9 +268,7 @@ export default async function StudentLessonPage({
         </>
       ) : null}
 
-      <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Ghi chú buổi học của tôi
-      </h2>
+      <SectionHeading title="Ghi chú buổi học của tôi" className="mt-10" />
 
       {notes === null ? (
         <Alert>
@@ -268,14 +276,16 @@ export default async function StudentLessonPage({
           trang.
         </Alert>
       ) : notes.length === 0 ? (
-        <Card>
-          <p className="text-sm text-muted-foreground">Chưa có ghi chú buổi học nào.</p>
+        <Card variant="list">
+          <p className="text-sm text-muted-foreground">
+            Chưa có ghi chú buổi học nào.
+          </p>
         </Card>
       ) : (
         <ul className="space-y-3">
           {notes.map((note) => (
             <li key={note.noteId}>
-              <Card>
+              <Card variant="list">
                 <Note note={note} />
               </Card>
             </li>
@@ -368,7 +378,7 @@ function Frame({
   children: ReactNode;
 }) {
   return (
-    <PageShell width="lg" align="center">
+    <PageShell width="4xl" align="center">
       {className ? null : (
         <PageHeader
           breadcrumb={[

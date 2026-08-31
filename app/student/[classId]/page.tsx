@@ -4,19 +4,25 @@ import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { BandProgress } from "@/components/student/band-progress";
+import {
+  LearningHistory,
+  RecentFeedback,
+} from "@/components/student/feedback-panels";
+import { HomeworkList } from "@/components/student/homework-list";
+import {
+  ScoreTrend,
+  type ScoreSeries,
+  type TrendFilter,
+} from "@/components/student/score-trend";
 import { Alert } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageShell } from "@/components/ui/page-shell";
+import { Tabs } from "@/components/ui/tabs";
 import { ATTENDANCE_LABELS } from "@/lib/attendance";
 import { LABELS, isOfferedCourseType } from "@/lib/course-type";
-import {
-  PERFORMANCE_LABELS,
-  SKILL_LABELS,
-  type Performance,
-} from "@/lib/lesson-log";
 import { loadUserState } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
 import {
@@ -24,40 +30,80 @@ import {
   formatBand,
   isBandScored,
   MEMBER_STATUS_LABELS,
-  SCORE_ENTRY_TYPE_LABELS,
 } from "@/lib/score";
 import {
   loadStudentBands,
   loadStudentClass,
   loadStudentFeedback,
+  loadStudentHomework,
   loadStudentLessons,
   loadStudentScoreHistory,
   type StudentBands,
   type StudentClassDetail,
-  type StudentFeedback,
   type StudentLesson,
-  type StudentScoreEntry,
 } from "@/lib/student";
 import { createClient } from "@/lib/supabase/server";
 import { formatZonedDate, formatZonedTime } from "@/lib/time";
+import { cn } from "@/lib/utils";
 
 /**
- * One of the student's classes.
+ * One of the student's classes — the Figma's `pages/student/Dashboard.tsx`.
  *
- * Who teaches it, what it is, when it runs, and the lessons the teacher has
- * scheduled with this student's own mark against each. Homework and progress
- * are still not read here, because nothing writes them yet.
+ * This is the design's only student screen, and it is class-scoped: a greeting,
+ * the navy band hero, and a segmented control over the views of one class. The
+ * Figma's student is hard-coded into a single class (`mockClasses[0]`), so its
+ * dashboard and its class page are the same screen; here a student can hold
+ * several memberships, so that screen is this route and `/student` is the list
+ * that chooses between them — the same relationship `/teacher` has with
+ * `/teacher/classes`.
  *
- * Everything on this page is read-only. There is no Server Action in this
- * route and no control that can reach one: attendance is the teacher's to
- * record, and a student's copy of it is a report, not a form.
+ * ## The tabs
  *
- * Identity comes from `loadUserState`, exactly as `/student` does, so there is
- * one answer to "who is this request" and not two. Membership comes from
- * `loadStudentClass`, which cannot return a class the caller is not joined to —
- * the `classId` in the URL selects a row, it does not authorise one. Underneath
- * both, `class_members_student_select` pins the query to `auth.uid()` whatever
- * this page asks for.
+ * Three are the Figma's, in its order — Tiến bộ, Bài tập, Lịch sử — and the
+ * fourth is not. **Buổi học** carries the lesson list and this student's own
+ * attendance mark against each, which M12 built and which the Figma's mock has
+ * no equivalent of. Removing it to match a screenshot would delete a working
+ * feature, so it is appended rather than substituted: the Figma's three keep
+ * their labels and their relative order, and the addition is visible as an
+ * addition.
+ *
+ * They are `<Link>`s over `?tab=`, not scripted panels, so a tab survives a
+ * refresh, sits in the back button, can be shared, and works with JavaScript
+ * off. `components/ui/tabs.tsx` explains that choice at length.
+ *
+ * NOT PREFETCHED, deliberately, and unlike the teacher's class detail. Each tab
+ * here is gated — the loader for a view runs only when that view is the one
+ * being rendered — so prefetching the three unopened tabs would issue every
+ * query on every visit and undo the gating. M24's `PendingTint` acknowledges
+ * the click in 1-2 ms instead, which is the same trade `/teacher/reports` and
+ * the filter pills already make.
+ *
+ * ## Reads
+ *
+ * The membership first, alone, because everything after it is scoped by the
+ * `membershipId` it returns. Then one `Promise.all` whose members are chosen by
+ * the tab: the hero's bands on every tab (it sits above the strip), the score
+ * history and the two feedback rows on Tiến bộ, the assignments on Bài tập, the
+ * full feedback list on Lịch sử, the sessions on Buổi học. Nothing is fetched
+ * for a view nobody opened.
+ *
+ * ## Authorization
+ *
+ * Unchanged from every other page in this half of the application, and not
+ * loosened by anything above. `loadUserState` says who is calling;
+ * `loadStudentClass` filters `class_members` by `getUser()`'s id, this
+ * `classId`, `join_status = 'joined'` and `removed_at is null`, so the URL
+ * selects a class and never authorises one; every loader below takes its
+ * `membershipId` from *that* answer and never from the request. Underneath all
+ * of it the student SELECT policies — `class_members_student_select`,
+ * `score_entries_student_select`, `lesson_logs_student_select`,
+ * `homework_assignments_student_select`, `homework_submissions_student_select`,
+ * `session_attendance_student_select` — pin every read to `auth.uid()` or to
+ * `app.my_member_ids()`. A classmate's row is not filtered out of these
+ * results; it never arrives in the process.
+ *
+ * Everything here is read-only. There is no Server Action in this route and no
+ * control that can reach one.
  */
 
 export const metadata: Metadata = {
@@ -71,87 +117,109 @@ const DATE = new Intl.DateTimeFormat("vi-VN", {
   timeZone: "UTC",
 });
 
-/**
- * How many pieces of teacher feedback the page shows.
- *
- * The Figma has two panels over the same rows — a "Recent Teacher Feedback"
- * card showing two, and a "My Learning History" tab showing every one. There is
- * one list here rather than two views of the same thing, long enough to be a
- * history and short enough that a student on a phone reaches the lessons below
- * it.
- */
-const FEEDBACK_LIMIT = 12;
-
-/** The Figma's performance colours, in this application's `Badge` tones. */
-const PERFORMANCE_TONE: Record<
-  Performance,
-  "green" | "primary" | "orange" | "destructive"
-> = {
-  excellent: "green",
-  good: "primary",
-  developing: "orange",
-  needs_attention: "destructive",
-};
-
 /** `YYYY-MM-DD` read as a calendar date, not a moment in the viewer's zone. */
-/**
- * One of the two lists the teacher keeps on this student, read-only.
- *
- * There is no action here and no form: `class_members` grants the student
- * SELECT and nothing else — `class_members_student_select` is the only student
- * policy on the table, and there is no student UPDATE policy for a write to
- * pass through even if this page offered one. The page stays what it has always
- * been, a view of the student's own row.
- *
- * An empty list says so in words. `strengths` and `focus_areas` are
- * `not null default '{}'`, so "nothing recorded" arrives as `[]` — which must
- * never be what the student actually reads.
- */
-function Tags({
-  label,
-  tags,
-  empty,
-}: {
-  label: string;
-  tags: string[];
-  empty: string;
-}) {
-  return (
-    <div className="min-w-0">
-      <p className="text-xs text-muted-foreground">{label}</p>
-
-      {tags.length === 0 ? (
-        <p className="mt-1 text-sm text-muted-foreground">{empty}</p>
-      ) : (
-        // Wrapping, never scrolling: a teacher's own phrase can be long, and
-        // the card has 390px to work with.
-        <ul className="mt-1.5 flex flex-wrap gap-1.5">
-          {tags.map((tag) => (
-            <li
-              key={tag}
-              className="min-w-0 rounded-full border border-input bg-background px-2.5 py-1 text-xs break-words text-foreground"
-            >
-              {tag}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 function asDate(iso: string): Date {
   return new Date(`${iso}T00:00:00Z`);
 }
 
+const TAB_KEYS = ["progress", "homework", "history", "lessons"] as const;
+type Tab = (typeof TAB_KEYS)[number];
+
+const TAB_LABELS: Record<Tab, string> = {
+  progress: "Tiến bộ",
+  homework: "Bài tập",
+  history: "Lịch sử",
+  lessons: "Buổi học",
+};
+
+const SERIES_KEYS = [
+  "overall",
+  "reading",
+  "listening",
+  "writing",
+  "speaking",
+] as const;
+
 /**
- * The student's own standing, in the same shape as the class facts above.
+ * How many feedback rows each view asks for.
+ *
+ * The Figma shows two in the Progress tab's card and every one in its History
+ * tab, which is the same query at two lengths rather than two queries.
+ */
+const RECENT_FEEDBACK = 2;
+const ALL_FEEDBACK = 60;
+
+function firstOf(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function readTab(value: string | undefined): Tab {
+  return TAB_KEYS.includes(value as Tab) ? (value as Tab) : "progress";
+}
+
+function readSeries(value: string | undefined): ScoreSeries {
+  return SERIES_KEYS.includes(value as ScoreSeries)
+    ? (value as ScoreSeries)
+    : "overall";
+}
+
+/**
+ * The Figma's greeting takes the last word of the name — which is the right end
+ * of a Vietnamese one. "Phạm Tiến Dũng" is family-first, so the word that
+ * addresses the person is "Dũng". The same reasoning `Avatar` uses for its
+ * initials, applied to a whole word.
+ */
+function givenName(fullName: string): string {
+  const words = fullName.trim().split(/\s+/).filter(Boolean);
+  return words[words.length - 1] ?? fullName;
+}
+
+/** The facts worth showing, skipping every column this class left blank. */
+function factsFor(detail: StudentClassDetail): { term: string; value: string }[] {
+  const facts: { term: string; value: string }[] = [];
+
+  // `LABELS` covers the three offered types; `course_type_other` is the name a
+  // teacher gave anything else, and the CHECK constraint guarantees it is set
+  // in precisely that case.
+  const course = isOfferedCourseType(detail.courseType)
+    ? LABELS[detail.courseType]
+    : detail.courseTypeOther;
+
+  if (course) facts.push({ term: "Khóa học", value: course });
+
+  // `classes.target_band` — the class's goal, which is NOT the same column as
+  // `class_members.target_band` in the card beside this one. Two different
+  // facts about two different rows, so they are named differently rather than
+  // both reading "Mục tiêu" a few pixels apart.
+  if (detail.targetBand !== null) {
+    facts.push({
+      term: "Mục tiêu của lớp",
+      value: `IELTS ${detail.targetBand.toFixed(1)}`,
+    });
+  }
+
+  facts.push({
+    term: "Thời gian",
+    value: detail.endDate
+      ? `${DATE.format(asDate(detail.startDate))} – ${DATE.format(asDate(detail.endDate))}`
+      : `Từ ${DATE.format(asDate(detail.startDate))}`,
+  });
+
+  if (detail.scheduleNote) {
+    facts.push({ term: "Lịch học", value: detail.scheduleNote });
+  }
+
+  return facts;
+}
+
+/**
+ * The student's own standing, in the same shape as the class facts.
  *
  * Every value comes from `v_member_current_band` and
- * `v_member_performance_status` exactly as the database reports them. Nothing is
- * averaged and nothing is compared here — the two views own those definitions,
- * and the teacher's page reads the same ones, so both sides of the application
- * say the same thing about the same student.
+ * `v_member_performance_status` exactly as the database reports them. Nothing
+ * is averaged and nothing is compared here — the two views own those
+ * definitions, and the teacher's page reads the same ones, so both sides of the
+ * application say the same thing about the same student.
  *
  * A row this student has no band for is left out rather than shown empty, for
  * the same reason `factsFor` skips a blank column: an empty value reads like a
@@ -188,7 +256,7 @@ function progressFor(bands: StudentBands): { term: string; value: string }[] {
   facts.push({ term: "Tiến bộ", value: MEMBER_STATUS_LABELS[bands.status] });
 
   // A calendar date in the class's zone, read as one — the same `asDate` the
-  // start and end dates above go through, and no browser-local conversion.
+  // start and end dates go through, and no browser-local conversion.
   if (bands.currentRecordedOn) {
     facts.push({
       term: "Cập nhật",
@@ -199,39 +267,9 @@ function progressFor(bands: StudentBands): { term: string; value: string }[] {
   return facts;
 }
 
-/** The facts worth showing, skipping every column this class left blank. */
-function factsFor(detail: StudentClassDetail): { term: string; value: string }[] {
-  const facts: { term: string; value: string }[] = [];
-
-  // `LABELS` covers the three offered types; `course_type_other` is the name a
-  // teacher gave anything else, and the CHECK constraint guarantees it is set
-  // in precisely that case.
-  const course = isOfferedCourseType(detail.courseType)
-    ? LABELS[detail.courseType]
-    : detail.courseTypeOther;
-
-  if (course) facts.push({ term: "Khóa học", value: course });
-
-  if (detail.targetBand !== null) {
-    facts.push({ term: "Mục tiêu", value: `IELTS ${detail.targetBand.toFixed(1)}` });
-  }
-
-  facts.push({
-    term: "Thời gian",
-    value: detail.endDate
-      ? `${DATE.format(asDate(detail.startDate))} – ${DATE.format(asDate(detail.endDate))}`
-      : `Từ ${DATE.format(asDate(detail.startDate))}`,
-  });
-
-  if (detail.scheduleNote) {
-    facts.push({ term: "Lịch học", value: detail.scheduleNote });
-  }
-
-  return facts;
-}
-
 export default async function StudentClassPage({
   params,
+  searchParams,
 }: DynamicPageProps<{ classId: string }>) {
   const { classId } = await params;
 
@@ -241,7 +279,7 @@ export default async function StudentClassPage({
     redirect("/auth/login");
   }
 
-  // Teachers and unplaceable accounts are `/`'s problem, as on `/student`.
+  // Teachers and unplaceable accounts are both `/`'s problem, not this page's.
   if (state.kind !== "student") {
     redirect("/");
   }
@@ -263,8 +301,8 @@ export default async function StudentClassPage({
     return (
       <Frame>
         {/* No trail and no class name: the load that failed is the one that
-            would have supplied both, and the shell's own "Lớp học" link is
-            still the way out. */}
+            would have supplied both, and the shell's own brand link is still
+            the way out. */}
         <PageHeader title="Lớp học" />
 
         {/* Not a 404: the query failed, and telling someone their class is
@@ -278,45 +316,84 @@ export default async function StudentClassPage({
   }
 
   const { detail } = result;
-  const facts = factsFor(detail);
+  const query = await searchParams;
+  const tab = readTab(firstOf(query.tab));
+  const series = readSeries(firstOf(query.skill));
 
-  // Only now: `detail.membershipId` came from the membership query above, which
-  // was filtered by `getUser()`'s id. Nothing off the URL reaches this call
-  // except `classId`, which has just been proved to be one of this student's.
   // Only an IELTS class has bands at all — `scoringModelFor` is the rule, and
-  // `classes_no_target_band_when_unscored` is the schema agreeing. Neither read
-  // answers to the other, so they go out together.
+  // `classes_no_target_band_when_unscored` is the schema agreeing.
   const banded = isBandScored(detail.courseType);
 
-  const [lessons, bands, history, feedback] = await Promise.all([
-    loadStudentLessons(supabase, detail.classId, detail.membershipId),
+  // `detail.membershipId` came from the membership query above, which was
+  // filtered by `getUser()`'s id. Nothing off the URL reaches these calls
+  // except `classId`, which has just been proved to be one of this student's.
+  // None of them answers to any other, so they go out together.
+  const [bands, history, feedback, homework, lessons] = await Promise.all([
     banded
       ? loadStudentBands(supabase, detail.classId, detail.membershipId)
       : Promise.resolve(null),
-    banded
+    banded && tab === "progress"
       ? loadStudentScoreHistory(supabase, detail.classId, detail.membershipId)
       : Promise.resolve(null),
-    // The Figma's "Recent Teacher Feedback" — this student's own `lesson_logs`
-    // rows, newest first. Not gated on `banded`: a teacher writes notes about
-    // any class, band-scored or not.
-    loadStudentFeedback(
-      supabase,
-      detail.classId,
-      detail.membershipId,
-      FEEDBACK_LIMIT,
-    ),
+    tab === "progress" || tab === "history"
+      ? loadStudentFeedback(
+          supabase,
+          detail.classId,
+          detail.membershipId,
+          tab === "progress" ? RECENT_FEEDBACK : ALL_FEEDBACK,
+        )
+      : Promise.resolve(null),
+    tab === "homework"
+      ? loadStudentHomework(supabase, detail.classId, detail.membershipId)
+      : Promise.resolve(null),
+    tab === "lessons"
+      ? loadStudentLessons(supabase, detail.classId, detail.membershipId)
+      : Promise.resolve(null),
   ]);
+
+  const base = `/student/${detail.classId}`;
+  // The default tab carries no parameter, so the plain class URL is the
+  // Progress view and a shared link is the short one.
+  const tabHref = (key: Tab) => (key === "progress" ? base : `${base}?tab=${key}`);
+  const seriesHref = (key: ScoreSeries) =>
+    key === "overall" ? base : `${base}?skill=${key}`;
+
+  const filters: TrendFilter[] = SERIES_KEYS.map((key) => ({
+    series: key,
+    // The Figma prints one capital per series. In Vietnamese "Nghe" and "Nói"
+    // share an initial, so the short word is the shortest thing that is still
+    // a name — and it is the label this application already uses for that
+    // column, not a synonym coined for a chip. See the note in
+    // `score-trend.tsx`.
+    label: BAND_FIELD_LABELS[key],
+    href: seriesHref(key),
+    current: key === series,
+  }));
+
+  const course = isOfferedCourseType(detail.courseType)
+    ? LABELS[detail.courseType]
+    : detail.courseTypeOther;
 
   return (
     <Frame>
+      {/* The Figma's greeting heads this screen and the class names the trail
+          above it — the design addresses the student and puts the class in the
+          subtitle, which is exactly what a breadcrumb already does better. The
+          last crumb is the current page, never a link (decision M). */}
       <PageHeader
         breadcrumb={[
           { label: "Lớp học", href: "/student" },
           { label: detail.className },
         ]}
-        title={detail.className}
-        meta={
-          detail.teacherName
+        title={`Chào ${givenName(state.student.fullName)} 👋`}
+        meta={[
+          <>
+            <span className="font-medium text-foreground">
+              {detail.className}
+            </span>
+            {course ? ` · ${course}` : ""}
+          </>,
+          ...(detail.teacherName
             ? [
                 <>
                   Giáo viên:{" "}
@@ -325,172 +402,258 @@ export default async function StudentClassPage({
                   </span>
                 </>,
               ]
-            : undefined
-        }
+            : []),
+        ]}
       />
 
-      <Card>
-        <dl className="space-y-3">
-          {facts.map((fact) => (
-            <div key={fact.term} className="flex gap-4 text-sm">
-              <dt className="w-24 shrink-0 text-muted-foreground">
-                {fact.term}
-              </dt>
-              <dd className="text-foreground">{fact.value}</dd>
-            </div>
-          ))}
-        </dl>
-      </Card>
-
-      <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Điểm mạnh và nội dung cần cải thiện
-      </h2>
-
-      <Card>
-        <div className="space-y-4">
-          <Tags
-            label="Điểm mạnh"
-            tags={detail.strengths}
-            empty="Chưa ghi nhận điểm mạnh nào."
-          />
-          <Tags
-            label="Nội dung cần cải thiện"
-            tags={detail.focusAreas}
-            empty="Chưa ghi nhận nội dung cần cải thiện nào."
-          />
-        </div>
-      </Card>
-
+      {/* The hero sits above the strip, as the Figma places it: it is the one
+          fact true of the class as a whole rather than of one view of it. */}
       {banded ? (
+        bands === null ? (
+          // Not "no bands": the query failed, and the two must not look alike.
+          <Alert className="mb-6">
+            Chúng tôi chưa tải được tiến bộ của bạn. Vui lòng tải lại trang.
+          </Alert>
+        ) : (
+          <div className="mb-6">
+            <BandProgress bands={bands} />
+          </div>
+        )
+      ) : null}
+
+      <Tabs
+        variant="primary"
+        label="Các mục của lớp học"
+        className="mb-5"
+        items={TAB_KEYS.map((key) => ({
+          label: TAB_LABELS[key],
+          href: tabHref(key),
+          current: key === tab,
+        }))}
+      />
+
+      {tab === "progress" ? (
         <>
-          <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Tiến bộ của tôi
-          </h2>
+          <div className="grid items-start gap-5 md:grid-cols-2">
+            {/* Left column: the Figma's chart panel. A class with no band
+                scoring has no series to plot, so the column is the focus card
+                on its own rather than an empty chart. */}
+            {banded ? (
+              history === null ? (
+                <Alert>
+                  Chúng tôi chưa tải được lịch sử điểm của bạn. Vui lòng tải lại
+                  trang.
+                </Alert>
+              ) : (
+                <ScoreTrend
+                  entries={history}
+                  series={series}
+                  filters={filters}
+                />
+              )
+            ) : null}
 
-          {bands === null ? (
-            // Not "no bands": the query failed, and the two must not look alike.
-            <Alert>
-              Chúng tôi chưa tải được tiến bộ của bạn. Vui lòng tải lại
-              trang.
-            </Alert>
-          ) : bands.currentOverall === null && bands.startOverall === null ? (
-            <Card>
-              <p className="text-sm text-muted-foreground">
-                Chưa ghi nhận band nào.
-              </p>
-            </Card>
-          ) : (
-            <>
-              {/* The Figma's navy hero. The `dl` below keeps the facts it does
-                  not draw — the standing the views report, and the date of the
-                  most recent entry — because a picture of a band is not the
-                  same as being told when it was taken. */}
-              <BandProgress bands={bands} />
+            <div className="space-y-4">
+              <Focus
+                strengths={detail.strengths}
+                focusAreas={detail.focusAreas}
+              />
 
-              <Card className="mt-4">
-                <dl className="space-y-3">
-                  {progressFor(bands).map((fact) => (
-                    <div key={fact.term} className="flex gap-4 text-sm">
-                      <dt className="w-24 shrink-0 text-muted-foreground">
-                        {fact.term}
-                      </dt>
-                      <dd className="break-words text-foreground">
-                        {fact.value}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              </Card>
-            </>
-          )}
+              {feedback === null ? (
+                <Alert>
+                  Chúng tôi chưa tải được nhận xét của giáo viên. Vui lòng tải
+                  lại trang.
+                </Alert>
+              ) : (
+                <RecentFeedback entries={feedback} />
+              )}
+            </div>
+          </div>
 
-          <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Lịch sử điểm
-          </h2>
+          {/* Facts the Figma's mock never has to show — the standing the views
+              report, when the band was last taken, and the class's own
+              schedule and dates. A picture of a band is not the same as being
+              told when it was measured. */}
+          <div className="mt-5 grid items-start gap-5 md:grid-cols-2">
+            {banded && bands !== null ? (
+              <Facts title="Chi tiết band" facts={progressFor(bands)} />
+            ) : null}
 
-          {history === null ? (
-            <Alert>
-              Chúng tôi chưa tải được lịch sử điểm của bạn. Vui lòng tải lại
-              trang.
-            </Alert>
-          ) : history.length === 0 ? (
-            <Card>
-              <p className="text-sm text-muted-foreground">
-                Chưa ghi nhận điểm nào.
-              </p>
-            </Card>
-          ) : (
-            <ul className="space-y-3">
-              {history.map((entry) => (
-                <li key={entry.entryId}>
-                  <Card>
-                    <ScoreEntry entry={entry} />
-                  </Card>
-                </li>
-              ))}
-            </ul>
-          )}
+            <Facts title="Thông tin lớp học" facts={factsFor(detail)} />
+          </div>
         </>
       ) : null}
 
-      <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Nhận xét của giáo viên
-      </h2>
+      {tab === "homework" ? (
+        homework === null ? (
+          <Alert>
+            Chúng tôi chưa tải được bài tập của bạn. Vui lòng tải lại trang.
+          </Alert>
+        ) : homework.length === 0 ? (
+          <EmptyState
+            title="Chưa có bài tập nào"
+            description="Khi giáo viên giao bài, bài tập sẽ xuất hiện ở đây."
+          />
+        ) : (
+          <HomeworkList items={homework} />
+        )
+      ) : null}
 
-      {feedback === null ? (
-        <Alert>
-          Chúng tôi chưa tải được nhận xét của giáo viên. Vui lòng tải lại
-          trang.
-        </Alert>
-      ) : feedback.length === 0 ? (
-        <Card>
-          <p className="text-sm text-muted-foreground">
-            Chưa có nhận xét nào.
-          </p>
-        </Card>
-      ) : (
-        <ul className="space-y-3">
-          {feedback.map((entry) => (
-            <li key={entry.logId}>
-              <Card>
-                <Feedback entry={entry} />
-              </Card>
-            </li>
-          ))}
-        </ul>
-      )}
+      {tab === "history" ? (
+        feedback === null ? (
+          <Alert>
+            Chúng tôi chưa tải được nhận xét của giáo viên. Vui lòng tải lại
+            trang.
+          </Alert>
+        ) : (
+          <LearningHistory entries={feedback} />
+        )
+      ) : null}
 
-      <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Buổi học
-      </h2>
-
-      {lessons === null ? (
-        // Not "no lessons": the query failed, and the two must not look alike.
-        <Alert>
-          Chúng tôi chưa tải được buổi học của bạn. Vui lòng tải lại trang.
-        </Alert>
-      ) : lessons.length === 0 ? (
-        <Card>
-          <p className="text-sm text-muted-foreground">
-            Chưa có buổi học nào được ghi nhận.
-          </p>
-        </Card>
-      ) : (
-        <ul className="space-y-3">
-          {lessons.map((lesson) => (
-            <li key={lesson.sessionId}>
-              <Card>
-                <Lesson
-                  classId={detail.classId}
-                  lesson={lesson}
-                  timezone={detail.timezone}
-                />
-              </Card>
-            </li>
-          ))}
-        </ul>
-      )}
+      {tab === "lessons" ? (
+        lessons === null ? (
+          // Not "no lessons": the query failed, and the two must not look alike.
+          <Alert>
+            Chúng tôi chưa tải được buổi học của bạn. Vui lòng tải lại trang.
+          </Alert>
+        ) : lessons.length === 0 ? (
+          <EmptyState
+            title="Chưa có buổi học nào"
+            description="Khi giáo viên tạo buổi học, buổi học sẽ xuất hiện ở đây."
+          />
+        ) : (
+          <ul className="space-y-3">
+            {lessons.map((lesson) => (
+              <li key={lesson.sessionId}>
+                <Card variant="list">
+                  <Lesson
+                    classId={detail.classId}
+                    lesson={lesson}
+                    timezone={detail.timezone}
+                  />
+                </Card>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : null}
     </Frame>
+  );
+}
+
+/**
+ * The Figma's "My Current Focus" card, carrying both of the teacher's lists.
+ *
+ * The design draws only the weaknesses, and only the first three of them. Both
+ * are kept whole here: `strengths` and `focus_areas` are two columns a teacher
+ * fills in deliberately (M15), and truncating one or dropping the other would
+ * hide something written about this student to make a card shorter. The chips
+ * wrap; the card grows.
+ *
+ * `not null default '{}'`, so "nothing recorded" arrives as `[]` — which must
+ * never be what the student reads as an answer.
+ */
+function Focus({
+  strengths,
+  focusAreas,
+}: {
+  strengths: string[];
+  focusAreas: string[];
+}) {
+  return (
+    <Card variant="list" className="p-4">
+      <h2 className="text-sm font-semibold text-foreground">
+        Trọng tâm hiện tại
+      </h2>
+      <p className="mt-1 mb-3 text-xs text-muted-foreground">
+        Do giáo viên của bạn chọn
+      </p>
+
+      <Chips
+        label="Nội dung cần cải thiện"
+        tags={focusAreas}
+        empty="Chưa ghi nhận nội dung cần cải thiện nào."
+        tone="primary"
+      />
+
+      <div className="mt-4">
+        <Chips
+          label="Điểm mạnh"
+          tags={strengths}
+          empty="Chưa ghi nhận điểm mạnh nào."
+          tone="neutral"
+        />
+      </div>
+    </Card>
+  );
+}
+
+function Chips({
+  label,
+  tags,
+  empty,
+  tone,
+}: {
+  label: string;
+  tags: string[];
+  empty: string;
+  tone: "primary" | "neutral";
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs text-muted-foreground">{label}</p>
+
+      {tags.length === 0 ? (
+        <p className="mt-1 text-xs text-muted-foreground">{empty}</p>
+      ) : (
+        // Wrapping, never scrolling: a teacher's own phrase can be long, and
+        // the card has 326px to work with at 390px.
+        <ul className="mt-1.5 flex flex-wrap gap-1.5">
+          {tags.map((tag) => (
+            <li
+              key={tag}
+              className={cn(
+                "min-w-0 rounded-full px-2.5 py-1 text-xs font-medium break-words",
+                // The Figma's focus chips are `#EDF0FF` on `#4466EE`; the
+                // strengths have no chip in the design, so they take the
+                // neutral outline this page already used for both lists.
+                tone === "primary"
+                  ? "bg-secondary text-secondary-foreground"
+                  : "border border-input bg-background text-foreground",
+              )}
+            >
+              {tag}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** A titled definition list — the shape the class facts have always had. */
+function Facts({
+  title,
+  facts,
+}: {
+  title: string;
+  facts: { term: string; value: string }[];
+}) {
+  return (
+    <Card variant="list">
+      <h2 className="mb-3 text-sm font-semibold text-foreground">{title}</h2>
+
+      <dl className="space-y-3">
+        {facts.map((fact) => (
+          <div key={fact.term} className="flex gap-4 text-sm">
+            <dt className="w-28 shrink-0 text-muted-foreground">{fact.term}</dt>
+            <dd className="min-w-0 break-words text-foreground">
+              {fact.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </Card>
   );
 }
 
@@ -508,7 +671,7 @@ export default async function StudentClassPage({
  *
  * The notes line appears only when there is something to read. Its absence is
  * not ambiguous, because the lesson's own page — one link away, and reachable
- * from every lesson here — says "No lesson notes yet." in words.
+ * from every lesson here — says so in words.
  */
 function Lesson({
   classId,
@@ -555,8 +718,9 @@ function Lesson({
         </p>
       ) : null}
 
-      {/* A plain link, like the one on `/student` — the whole card being a
-          target would swallow anything added to it later. */}
+      {/* A plain link, not a clickable card: the whole surface being a target
+          would swallow anything added to it later, and a link is what a
+          keyboard and a screen reader can actually find. */}
       <Button asChild variant="outline" size="sm" className="mt-4">
         <Link href={`/student/${classId}/sessions/${lesson.sessionId}`}>
           Mở buổi học
@@ -567,118 +731,15 @@ function Lesson({
 }
 
 /**
- * The shell every state shares. Each state heads itself, because only the one
- * that loaded knows the class's name; the way out of all of them is the
- * shell's own navigation, which every page under `/student` is wrapped in.
+ * The shell every state shares — the Figma's `max-w-4xl mx-auto` column under
+ * the student top bar. Each state heads itself, because only the one that
+ * loaded knows the class's name; the way out of all of them is the shell's own
+ * brand link and the breadcrumb.
  */
 function Frame({ children }: { children: ReactNode }) {
   return (
-    <PageShell width="lg" align="center">
+    <PageShell width="4xl" align="center">
       {children}
     </PageShell>
-  );
-}
-
-/**
- * One band entry in the history — what was recorded, and when.
- *
- * `score_entries` is append-only and every row is a measurement the teacher
- * made on a day, so this prints the row rather than interpreting it: the entry
- * type as the teacher chose it, every skill that carries a band, and the note
- * if there is one. Nothing is compared to the entry before it — the hero above
- * owns the only comparison this page makes, and it makes it from the view.
- *
- * A skill with no band is left out rather than shown as a dash: an entry that
- * recorded only Writing is a real thing a teacher does, and four empty cells
- * would suggest four bad results.
- */
-function ScoreEntry({ entry }: { entry: StudentScoreEntry }) {
-  const skills = (
-    [
-      ["reading", entry.reading],
-      ["listening", entry.listening],
-      ["writing", entry.writing],
-      ["speaking", entry.speaking],
-    ] as const
-  )
-    .map(([skill, band]) => {
-      const shown = formatBand(band);
-      return shown === null ? null : `${BAND_FIELD_LABELS[skill]} ${shown}`;
-    })
-    .filter((part): part is string => part !== null);
-
-  const overall = formatBand(entry.overall);
-
-  return (
-    <>
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-        <div className="min-w-0 grow basis-48">
-          <p className="text-xs text-muted-foreground">
-            {DATE.format(asDate(entry.recordedOn))}
-          </p>
-
-          {overall === null ? null : (
-            <p className="mt-1 text-lg font-semibold text-foreground">
-              {`Band ${overall}`}
-            </p>
-          )}
-        </div>
-
-        <Badge tone="neutral" className="shrink-0">
-          {SCORE_ENTRY_TYPE_LABELS[entry.entryType]}
-        </Badge>
-      </div>
-
-      {skills.length > 0 ? (
-        <p className="mt-2 text-sm break-words text-muted-foreground">
-          {skills.join(" · ")}
-        </p>
-      ) : null}
-
-      {entry.note ? (
-        <p className="mt-3 rounded-lg bg-background p-3 text-sm break-words whitespace-pre-wrap text-muted-foreground italic">
-          {entry.note}
-        </p>
-      ) : null}
-    </>
-  );
-}
-
-/**
- * One lesson note the teacher wrote about this student.
- *
- * Read-only, like everything else on this page. `lesson_logs` grants the
- * student SELECT through `lesson_logs_student_select` and nothing more, so
- * there is no control here that could write one even if the page offered it.
- *
- * `lesson_date` is a `date` — a calendar square the teacher already resolved
- * onto the class clock — so it is read at UTC midnight through the same `DATE`
- * formatter the class dates use, and never reinterpreted in the reader's zone.
- */
-function Feedback({ entry }: { entry: StudentFeedback }) {
-  return (
-    <>
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-        <div className="min-w-0 grow basis-48">
-          <p className="text-xs text-muted-foreground">
-            {`${DATE.format(asDate(entry.lessonDate))} · ${SKILL_LABELS[entry.skill]}`}
-          </p>
-
-          <p className="mt-1 font-medium break-words text-foreground">
-            {entry.topic}
-          </p>
-        </div>
-
-        <Badge tone={PERFORMANCE_TONE[entry.performance]} className="shrink-0">
-          {PERFORMANCE_LABELS[entry.performance]}
-        </Badge>
-      </div>
-
-      {entry.note ? (
-        <p className="mt-3 rounded-lg bg-background p-3 text-sm break-words whitespace-pre-wrap text-muted-foreground italic">
-          {entry.note}
-        </p>
-      ) : null}
-    </>
   );
 }
