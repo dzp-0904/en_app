@@ -22,6 +22,8 @@
  * app uses. `classes.start_date` is a `date` — a calendar square, correctly read
  * as `T00:00:00Z` and formatted with `timeZone: "UTC"` — and it stays that way.
  * A session is an appointment, not a square, which is why it needs this instead.
+ * `formatCalendarDate` at the foot of this file is that other convention's one
+ * home, so the two live side by side and neither can be mistaken for the other.
  *
  * No dependency: `Intl` has known every IANA zone and its historical transitions
  * since Node 14, and a date library would be a second, disagreeing source of
@@ -180,6 +182,36 @@ export function formatZonedTime(zone: string, instant: string): string {
     minute: "2-digit",
     hour12: false,
   }).format(new Date(instant));
+}
+
+/**
+ * `dd/MM/yyyy` for a bare `date` column — "01/09/2026".
+ *
+ * The other half of this module, and deliberately not interchangeable with
+ * `formatZonedDate` above: that one takes an *instant* and needs a zone to read
+ * it on, this one takes a *calendar square* and must not be given one.
+ * `classes.start_date`, `classes.end_date`, `lesson_logs.lesson_date`,
+ * `score_entries.recorded_on` and `homework_assignments.due_date` are all `date`
+ * columns — days the class's clock already decided on when the row was written.
+ * They carry no time of day, so putting one through a timezone is how a lesson
+ * on the 1st gets printed as the 31st. They are read at UTC midnight and
+ * formatted there.
+ *
+ * `vi-VN` with numeric day and month, matching `formatZonedDate`: Vietnamese
+ * abbreviates September as "thg 9", and `dd/MM/yyyy` is the form every
+ * Vietnamese reader parses without thinking.
+ *
+ * This is the convention seven screens had each spelled out for themselves in a
+ * local `Intl.DateTimeFormat`. It lives here now so there is one definition to
+ * change; the remaining call sites are identical in output and can adopt it as
+ * each is next touched.
+ */
+export function formatCalendarDate(isoDate: string): string {
+  return formatterFor("UTC", "calendar-day", "vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(new Date(`${isoDate}T00:00:00Z`));
 }
 
 /**

@@ -19,9 +19,10 @@ import {
 } from "@/components/ui/table";
 import { LABELS } from "@/lib/course-type";
 import { loadUserState } from "@/lib/onboarding";
+import { localiseScheduleNote } from "@/lib/schedule-note";
 import { createClient } from "@/lib/supabase/server";
 import { loadTeacherClasses, type TeacherClass } from "@/lib/teacher";
-import { zonedCalendarDate } from "@/lib/time";
+import { formatCalendarDate, zonedCalendarDate } from "@/lib/time";
 
 export const metadata: Metadata = {
   title: "Lớp học",
@@ -133,24 +134,6 @@ function progressOf(
 function byStartDateDesc(a: TeacherClass, b: TeacherClass): number {
   if (a.startDate === b.startDate) return 0;
   return a.startDate < b.startDate ? 1 : -1;
-}
-
-/**
- * `start_date` and `end_date` are `date` columns — calendar squares, not
- * instants — so they are read at UTC midnight and formatted there. See
- * `lib/time.ts` for the instants, which are a different problem: a `date` has
- * no time of day to move across a zone boundary, and putting one through a
- * timezone is how you print the wrong day.
- */
-const DATE = new Intl.DateTimeFormat("vi-VN", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  timeZone: "UTC",
-});
-
-function formatDate(isoDate: string): string {
-  return DATE.format(new Date(`${isoDate}T00:00:00Z`));
 }
 
 export default async function TeacherClassesPage() {
@@ -277,9 +260,18 @@ export default async function TeacherClassesPage() {
                     {DELIVERY_MODE}
                   </TableCell>
 
-                  <TableCell className="align-top whitespace-nowrap tabular-nums">
-                    {`${formatDate(entry.startDate)} - ${
-                      entry.endDate ? formatDate(entry.endDate) : "Chưa đặt"
+                  {/* No `tabular-nums`. It was the one place in the
+                      application asking for the fixed-width figure set, so
+                      these dates rendered in different glyphs from every other
+                      date in the app and from the time in the column beside
+                      them. The dates themselves come from `lib/time.ts` for
+                      the same reason: one definition of `dd/MM/yyyy`, not a
+                      formatter per screen. */}
+                  <TableCell className="align-top whitespace-nowrap">
+                    {`${formatCalendarDate(entry.startDate)} - ${
+                      entry.endDate
+                        ? formatCalendarDate(entry.endDate)
+                        : "Chưa đặt"
                     }`}
                   </TableCell>
 
@@ -302,11 +294,15 @@ export default async function TeacherClassesPage() {
                   </TableCell>
 
                   {/* `schedule_note` is display-only by the migration's own
-                      comment, so it is printed as the teacher typed it and
-                      nothing is derived from it. A class without one says so
-                      rather than being given a schedule it does not have. */}
+                      comment, so nothing is derived from it and nothing is
+                      written back. `localiseScheduleNote` translates the
+                      English weekday words a note may carry — "Tuesday &
+                      Thursday, 7:30 PM" reads "Thứ 3 & Thứ 5, 7:30 PM" — and
+                      leaves every other character, the time included, as the
+                      teacher typed it. A class without a note says so rather
+                      than being given a schedule it does not have. */}
                   <TableCell className="align-top break-words">
-                    {entry.scheduleNote ?? (
+                    {localiseScheduleNote(entry.scheduleNote) ?? (
                       <span className="text-muted-foreground">Chưa đặt</span>
                     )}
                   </TableCell>
