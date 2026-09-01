@@ -5,7 +5,8 @@ Read it in full before starting any milestone. Do not ask the user for anything
 that is already answered here, in the repository, in git history, or in the
 current milestone prompt.
 
-Last updated: 2026-08-31, after M27 (M27 is UNCOMMITTED — in the working tree).
+Last updated: 2026-09-01, after M28 (M28 is UNCOMMITTED — in the working tree;
+M27 was committed by the user as `0269c0a`).
 
 ---
 
@@ -235,6 +236,7 @@ Localization applies to **display text**, not the data model.
 | Strengths | Điểm mạnh |
 | Focus areas | Nội dung cần cải thiện |
 | Performance | Kết quả |
+| Lesson-note result scale (`public.performance`, M28) | Học nhanh / Có cố gắng / Cần cải thiện / Cảnh báo |
 | Present / Late / Absent / Excused | Có mặt / Đi muộn / Vắng mặt / Có phép |
 | Invite students / Add student / Remove student | Mời học viên / Thêm học viên / Xóa học viên khỏi lớp |
 | Edit class / Class Info | Chỉnh sửa lớp / Thông tin lớp |
@@ -1470,30 +1472,81 @@ known gaps.
     sortable. Per-student PDF/DOCX covers the parent-facing case.
   - **NO COMMIT WAS CREATED.** M27 lives entirely in the working tree.
 
-## 14. Current project state (verified 2026-08-31, after M27)
+### M28 — lesson-note result labels reworded (**uncommitted**, in the working tree)
+- **Scope: four strings.** The teacher's "Kết quả" field on a lesson note now
+  reads **Học nhanh / Có cố gắng / Cần cải thiện / Cảnh báo** instead of
+  Xuất sắc / Tốt / Đang tiến bộ / Cần chú ý.
+- **Nothing below the label moved.** `public.performance` still carries
+  `excellent | good | developing | needs_attention`; the `<option value>`s the
+  form submits are unchanged, `isPerformance` still validates against the same
+  four, and every historical `lesson_logs` row keeps its stored value and simply
+  renders with the new word. **No migration, no RLS/RPC/grant/schema change, no
+  new dependency, no AI.**
+- **One file changed: `lib/lesson-log.ts`.** `PERFORMANCE_LABELS` is the single
+  display map, so that one edit reaches all six surfaces that show the value —
+  the note form on `/teacher/[classId]/sessions/[sessionId]`, that page's note
+  list, the class-detail note list, `/teacher/lesson-logs`, the student lesson
+  page and `components/student/feedback-panels.tsx` (both the Progress and
+  History tabs), plus `components/report/report-preview.tsx`. This is the §3
+  architecture working as intended: the label map lives beside its enum, and
+  nothing hardcodes the words in JSX.
+- **The order is still strongest first**, so the three `Performance` → tone
+  tables (green / primary / orange / destructive, keyed by the enum and unmoved)
+  still pair the right colour with the right word — and now pair better:
+  `needs_attention` reads "Cảnh báo" against the destructive tint it already had.
+- **A collision was removed, not created.** "Đang tiến bộ" was the label for
+  *both* `performance.developing` (a lesson note) and `member_status.improving`
+  (a student's standing, `MEMBER_STATUS_LABELS` in `lib/score.ts`), and likewise
+  "Cần chú ý" for `performance.needs_attention` and
+  `member_status.needs_attention`. Those are different enums on different
+  screens. `lib/score.ts` is **untouched** — the roster filter is still
+  Đang tiến bộ / Ổn định / Cần chú ý, `filter=stable` still labels "Ổn định"
+  (M19), and the `/teacher` dashboard's two counts still read Đang tiến bộ /
+  Cần chú ý because those are member statuses.
+- **Exports were not touched and did not need to be.** `lib/export/` never
+  printed the per-note performance; its "Kết quả" row is `statusLabel(report)`,
+  the member standing. The monthly report data logic, attendance, scores, bands,
+  homework and teacher comments are all unchanged (`git diff` names one file).
+- **Verified against the production standalone build on `localhost:3000`:**
+  - The form's `<select>` renders
+    `excellent=Học nhanh · good=Có cố gắng · developing=Cần cải thiện ·
+    needs_attention=Cảnh báo` — new words, **original values**.
+  - The one **real historical note** (stored `needs_attention`) renders
+    "Cảnh báo" on `/teacher/lesson-logs`, in the class-detail note list, in the
+    report preview, on the student's Tiến bộ and Lịch sử tabs and on the student
+    lesson page. Requirement 3 shown on production data, with **no write**.
+  - "Xuất sắc", "Đang tiến bộ" and "Cần chú ý" appear on **none** of those
+    pages; "Ổn định" still does, so the two enums are visibly distinct.
+  - `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ · **26 routes**.
+- **Note for a future session:** `app/teacher/page.tsx` shortens the focus-areas
+  line to `Cần cải thiện: …` (§3 spells the field "Nội dung cần cải thiện"), so
+  that phrase now also names a performance level on a different screen. It was
+  left alone deliberately — changing it is outside M28 and the two never appear
+  together.
+- **NO COMMIT WAS CREATED.**
+
+## 14. Current project state (verified 2026-09-01, after M28)
 
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `11e2645` — "docs: record M26 in project memory" |
-| `origin/main` | `11e2645`. **Everything through M26 is pushed** — an earlier
-  revision of this file claimed M26's commits were local, and that is now stale. |
+| HEAD | `5ed9fb9` — ":package: synchronize package lockfile for Docker builds" |
+| M27 | committed by the user as `0269c0a` — "feat: add deterministic monthly
+  progress reports and export (M27)". An earlier revision of this file described
+  M27 as uncommitted; that is now stale. |
+| `origin/main` | `5ed9fb9`. Everything through M27 is pushed. |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
-| Working tree | **NOT clean — M27 is uncommitted, by instruction.** `2` modified
-  source files (`app/teacher/reports/page.tsx`, `next.config.ts`), `package.json`
-  + `package-lock.json` for the two new dependencies, and `12` new files
-  (`app/teacher/reports/export/route.ts`, `assets/fonts/` ×3,
-  `components/report/` ×4, `lib/export/` ×6 — see §13 M27) plus this file. |
+| Working tree | **NOT clean — M28 is uncommitted, by instruction.** One modified
+  source file (`lib/lesson-log.ts`) plus this file. |
 | Routes | **26** (24 `page.tsx` + 2 `route.ts`: `app/auth/callback/route.ts` and
-  M27's `app/teacher/reports/export/route.ts`) |
+  `app/teacher/reports/export/route.ts`) |
 | Migrations | 15, unchanged since the database foundation commit |
 | RLS | enabled + FORCEd on 13 tables |
-| Client components | still **six** — M27 added four `components/report/*` and
-  all four are Server Components |
-| Shared primitives | still **19** — M27 added none and changed none |
-| Dependencies | M27 added `pdf-lib` and `@pdf-lib/fontkit` (PDF only; DOCX and
-  XLSX use Node's own `zlib`). Still no i18n library, no charting library, no AI
-  SDK; `lucide-react` is installed and imported nowhere. |
+| Client components | still **six** |
+| Shared primitives | still **19** |
+| Dependencies | unchanged since M27 (`pdf-lib`, `@pdf-lib/fontkit`). Still no
+  i18n library, no charting library, no AI SDK; `lucide-react` is installed and
+  imported nowhere. |
 | Gates | `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ |
 
 **Measured hop costs against this hosted Supabase project** (from Node, outside

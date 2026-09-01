@@ -48,11 +48,32 @@ export const PERFORMANCE_LEVELS = [
   "needs_attention",
 ] as const satisfies readonly Performance[];
 
+/**
+ * What each `public.performance` value is called on screen.
+ *
+ * M28 reworded all four. The **stored values are unchanged** — `excellent`,
+ * `good`, `developing` and `needs_attention` are still what the database holds
+ * and still what the `<select>` submits — so every historical `lesson_logs` row
+ * keeps its meaning and simply reads with the new word. This is a display map,
+ * not a migration, which is exactly why one edit here reaches the note form,
+ * both lesson pages, the class-detail note list, Nhật ký buổi học, the student
+ * feedback panels and the monthly report preview.
+ *
+ * The order is still strongest first, so the tone tables that sit beside this
+ * map — green / primary / orange / destructive, in `PERFORMANCE_LEVELS` order —
+ * keep pairing the right colour with the right word.
+ *
+ * `developing` and `needs_attention` deliberately no longer read as
+ * encouragement ("Đang tiến bộ", "Cần chú ý"): the teacher asked for a scale
+ * that says plainly when a student is behind. "Đang tiến bộ" also collided with
+ * `MEMBER_STATUS_LABELS.improving` in `lib/score.ts`, which is a different enum
+ * on a different screen; the two no longer share a word.
+ */
 export const PERFORMANCE_LABELS: Record<Performance, string> = {
-  excellent: "Xuất sắc",
-  good: "Tốt",
-  developing: "Đang tiến bộ",
-  needs_attention: "Cần chú ý",
+  excellent: "Học nhanh",
+  good: "Có cố gắng",
+  developing: "Cần cải thiện",
+  needs_attention: "Cảnh báo",
 };
 
 export function isPerformance(value: string): value is Performance {
