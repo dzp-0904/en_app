@@ -5,8 +5,8 @@ Read it in full before starting any milestone. Do not ask the user for anything
 that is already answered here, in the repository, in git history, or in the
 current milestone prompt.
 
-Last updated: 2026-09-01, after M28 (M28 is UNCOMMITTED — in the working tree;
-M27 was committed by the user as `0269c0a`).
+Last updated: 2026-09-01, after M29 (M29 is UNCOMMITTED — in the working tree;
+M27 was committed by the user as `0269c0a`, M28 as `631a415`).
 
 ---
 
@@ -1525,25 +1525,145 @@ known gaps.
   together.
 - **NO COMMIT WAS CREATED.**
 
-## 14. Current project state (verified 2026-09-01, after M28)
+### M29 — teacher class list rebuilt as a six-column table (**uncommitted**, in the working tree)
+- **Inspected before editing, as the brief required, and one field was missing.**
+  Five of the six columns were already carried by `TeacherClassFields` /
+  `TeacherClass`; **"Loại lớp = Online / Offline" had nothing behind it.**
+  `public.classes` has no delivery-mode column, `public.course_type` is the
+  *subject* (`ielts | general_english | academic_english | other`),
+  `components/class/class-form.tsx` never asks, and a grep across all fifteen
+  migrations plus `app/`, `lib/` and `components/` for online / offline / mode /
+  venue / location / platform returned exactly one hit —
+  `class_sessions.location text`, nullable undocumented free text on an
+  *individual session*. Reported and **asked** rather than inferred; the teacher
+  answered that the value has one possibility: every class here is online. It is
+  therefore a `DELIVERY_MODE` constant in the page with a JSDoc saying so —
+  decision **AF**.
+- **Implemented — 1 file changed, 0 new files, 0 new dependencies, 0 new client
+  components, 0 shared primitives touched, and no `lib/` change at all.**
+  `app/teacher/classes/page.tsx` went from a card list to
+  `components/ui/table.tsx`: **Tên lớp · Loại lớp · Khai giảng - Kết thúc ·
+  Tiến độ học · Sĩ số · Lịch học**.
+  - **Tên lớp** is the row's navigation target — a `<Link>` named after the
+    class (not a clickable row, which a keyboard and a screen reader cannot
+    find), hosting `PendingTint`, over a small second line carrying the course
+    label and `Band mục tiêu 6.5` when set. `IELTS · IELTS 6.5` was caught in
+    verification and reworded; the two are different facts and were reading as
+    a stutter.
+  - **Tiến độ học** is `progressOf(today, start, end)` — three states,
+    **Sắp tới / Đang diễn ra / Kết thúc**, both edges inclusive, derived from
+    the two date columns and **no new database column**. `today` is
+    `zonedCalendarDate(entry.timezone, now)`, so the comparison happens on the
+    **class's** clock; all three values are `YYYY-MM-DD` and compare as strings,
+    with no `Date` constructed and no `toISOString().slice(0, 10)` anywhere. An
+    open-ended class (`end_date is null`, which
+    `classes_end_after_start` allows) is never "Kết thúc".
+  - **Sĩ số** is `studentCount` from the existing `tallyClassMembers`, with
+    `N đang chờ` underneath only when there are unclaimed invitations — the same
+    class's own roster, which the card already showed.
+  - **Lịch học** prints `schedule_note` as typed, or **Chưa đặt**. Nothing is
+    parsed out of it and no schedule is invented.
+- **No second `classes` query, and no shared loader changed.** Every value comes
+  from M24's `TeacherContext.classes` plus the one roster tally the page already
+  ran. `lib/teacher.ts` is **untouched**.
+- **Sorting is `start_date` DESC, done in the page, and that is deliberate**
+  (decision **AG**). `loadTeacherClassList` *is* M24's single `classes` read and
+  its rows are shared with `/teacher`, `/teacher/calendar` (which indexes
+  `CLASS_TONES` **positionally**, so a reorder recolours the calendar),
+  `/teacher/lesson-logs`, `/teacher/reports` and `/teacher/tuition`, whose class
+  filter pills are drawn in list order. Moving its `ORDER BY` would have
+  reordered and recoloured five pages the brief said not to modify; sorting in
+  the database without that would have needed a second `classes` query, which it
+  also said not to add. The tie-break is free: `Array.prototype.sort` is stable
+  and the rows arrive in `created_at` DESC, so same-day starts keep
+  newest-created first.
+- **A real defect was found during verification and fixed.** At **exactly
+  1024px the page itself scrolled 135px**. `PageShell` renders `flex-1` on its
+  `<main>`, and from `lg` up `AppShell` lays the sidebar and that main out as a
+  flex **row** — where `min-width` defaults to `auto`, so the main never shrank
+  below the table's `min-width` and the scroller never got the chance to scroll.
+  Fixed with `className="min-w-0"` on this page's `PageShell` rather than in the
+  primitive: no other page has content with an intrinsic minimum, so this is the
+  only one that needs it. (This is §2's documented flexbox note, in a second
+  form: `flex-1` is `flex: 1 1 0%`, but `min-width: auto` still holds the floor.)
+- **Verified against the production standalone build on `localhost:3000`:**
+  - **The derivation functions were exercised directly**, their source
+    **extracted verbatim from the shipped `page.tsx`** and imported through
+    Node's type stripping — not a retyped copy. All **9** boundary cases pass:
+    day before start, first day, middle, last day, day after end, open-ended
+    started, open-ended not started, single-day class, year boundary. The
+    class timezone is shown to *decide*: `2026-08-31T18:00Z` is `2026-09-01` in
+    `Asia/Ho_Chi_Minh` (→ **Đang diễn ra**) and `2026-08-31` in
+    `America/Los_Angeles` and UTC (→ **Sắp tới**), so the naive UTC slice would
+    have given the wrong answer. The stable sort was proven on four synthetic
+    classes: `start_date` DESC with `created_at` DESC preserved across a tie.
+  - **Production data, read not written:** `IELTS Evening Group B` renders
+    `Online`, `01/09/2026 - 30/11/2026`, **Đang diễn ra** (today is its first
+    day — the inclusive start edge, on the real row), `1`, and its real
+    `schedule_note`. The class link is `/teacher/<uuid>` and navigating it lands
+    on the class detail page with its own `h1`.
+  - **Responsive:** 6 widths — 1280 `scrollX=0`, region 974/974 (fits); 1024,
+    768, 390, 360, 320 all `scrollX=0` with the region scrolling **inside the
+    card** (718, 702, 324, 294, 254 client over 847 content). **Zero page-level
+    horizontal scroll, zero clipping** at every width.
+  - **Accessibility: 0 problems.** One `h1`; **6 `<th scope="col">`**; the
+    scroller is `role="region"` `aria-label="Danh sách lớp học"` and a tab stop;
+    zero duplicate ids, zero nameless controls, zero unlabelled inputs; one
+    `aria-current="page"` per labelled landmark (Điều hướng chính, Đường dẫn).
+    The status badge carries its state **as text**, so it survives greyscale and
+    a screen reader. Focus rings measured by **real Tab traversal**
+    (`Input.dispatchKeyEvent`, because a programmatic `.focus()` does not set
+    `:focus-visible` and reports `none` on controls that are in fact fine):
+    **all 12 controls `solid 2px`**, including the new scroller region and the
+    class-name link.
+  - **No-JS** (`Emulation.setScriptExecutionDisabled`): the table renders with
+    its row, the class link as a real `href`, the labelled region intact, and
+    `pending-tint` / `animate-pulse` counts **0**.
+  - **Click feedback:** `PendingTint` appears **7 ms** after the click, exactly
+    the link's box (150×20) at the link's own 4px radius.
+  - **Security and regression:** anonymous `/teacher/classes`, `/teacher` and
+    `/student` all **307 → `/auth/login`**; the student account is redirected to
+    `/student` from `/teacher/classes`, `/teacher` and `/teacher/calendar`; all
+    **8** teacher pages still render one `h1` and seven nav links.
+    `git diff --stat` is **empty** for `components/attendance/`, every
+    `actions.ts`, `supabase/`, `proxy.ts` and `lib/supabase/`; `useFormStatus`
+    is still at `components/attendance/status-buttons.tsx:46`.
+  - **Console: 0 errors, 0 warnings** across 7 teacher pages and 6 widths.
+  - `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ · **26 routes**,
+    unchanged.
+  - Diff: **1 file changed, 220 insertions(+), 77 deletions(-)**.
+- **Limitations:**
+  - Production has exactly **one** class, so the **sort order**, the
+    **Sắp tới** and **Kết thúc** badges, the open-ended `Chưa đặt` end date and
+    the `N đang chờ` line were exercised against the shipped functions from Node
+    rather than screenshotted. Creating a second class is a production write.
+    **No preview route was created and none exists in the tree.**
+  - `Loại lớp` is a constant. It is correct for every class that exists today
+    and is correct only for as long as the product stays online-only; see
+    decision **AF** for what has to change first.
+  - The brief referred to an uploaded reference screenshot, but **no image was
+    attached to the message**. The layout follows the brief's own ASCII sketch
+    and the existing design system.
+- **NO COMMIT WAS CREATED.**
+
+## 14. Current project state (verified 2026-09-01, after M29)
 
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `5ed9fb9` — ":package: synchronize package lockfile for Docker builds" |
-| M27 | committed by the user as `0269c0a` — "feat: add deterministic monthly
-  progress reports and export (M27)". An earlier revision of this file described
-  M27 as uncommitted; that is now stale. |
-| `origin/main` | `5ed9fb9`. Everything through M27 is pushed. |
+| HEAD | `631a415` — ":art: modify performance labels" (M28, committed by the user) |
+| M27 / M28 | both committed by the user — M27 as `0269c0a`, M28 as `631a415`.
+  Earlier revisions of this file described each as uncommitted; that is stale. |
+| `origin/main` | everything through M28 is pushed. |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
-| Working tree | **NOT clean — M28 is uncommitted, by instruction.** One modified
-  source file (`lib/lesson-log.ts`) plus this file. |
+| Working tree | **NOT clean — M29 is uncommitted, by instruction.** One modified
+  source file (`app/teacher/classes/page.tsx`) plus this file. |
 | Routes | **26** (24 `page.tsx` + 2 `route.ts`: `app/auth/callback/route.ts` and
-  `app/teacher/reports/export/route.ts`) |
+  `app/teacher/reports/export/route.ts`) — M29 added none |
 | Migrations | 15, unchanged since the database foundation commit |
 | RLS | enabled + FORCEd on 13 tables |
 | Client components | still **six** |
-| Shared primitives | still **19** |
+| Shared primitives | still **19** — M29 added none and changed none |
 | Dependencies | unchanged since M27 (`pdf-lib`, `@pdf-lib/fontkit`). Still no
   i18n library, no charting library, no AI SDK; `lucide-react` is installed and
   imported nowhere. |
@@ -1741,6 +1861,42 @@ Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
   Parent" button have no data behind them and are therefore **absent**, not
   approximated (decision **P**). There is no LLM, no AI API and no summarizer
   anywhere in this feature.
+
+- **AF.** **"Loại lớp" is a stated product fact, not a column.** Nothing in the
+  schema records whether a class is taught online or in a room: `public.classes`
+  has no delivery-mode column, `public.course_type` is the *subject*, the class
+  form never asks, and the only adjacent column in fifteen migrations is
+  `class_sessions.location` — nullable free text on an *individual session*.
+  Asked rather than inferred, the teacher answered that every class here is
+  **Online**, so `/teacher/classes` renders one `DELIVERY_MODE` constant with a
+  JSDoc saying exactly that. Do not "improve" this by deriving it from
+  `class_sessions.location`, from `course_type`, or from the schedule text — all
+  three would be inventing a convention. The day a class meets in a room, the
+  constant is not the thing to edit: `classes` needs a real column,
+  `components/class/class-form.tsx` needs to ask for it, and the existing rows
+  need a backfill decision.
+- **AG.** **`/teacher/classes` sorts `start_date` DESC in the page, not in the
+  query, and that is not laziness.** `loadTeacherClassList` is M24's single
+  `classes` read, and its rows are `TeacherContext.classes` — shared with
+  `/teacher`, `/teacher/lesson-logs`, `/teacher/reports` and `/teacher/tuition`
+  (whose class filter pills are drawn in list order) and with
+  `/teacher/calendar`, which indexes `CLASS_TONES` **positionally**, so
+  reordering that query recolours the calendar. Sorting in the database without
+  that side effect would require a second `classes` query, which M24 exists to
+  avoid. The tie-break is free and must stay free: `Array.prototype.sort` is
+  stable and the rows arrive in `created_at` DESC, so two classes starting the
+  same day keep newest-created first — do not replace the comparator with one
+  that returns a non-zero value for equal start dates.
+- **AH.** **`flex-1` is not enough to let a flex item shrink.** §2 already
+  records that `flex-1` is `flex: 1 1 0%`; the other half is that a flex item's
+  `min-width` still defaults to `auto`, so an item containing something with an
+  intrinsic minimum — a table with a `min-width`, a `<pre>`, a long unbroken
+  string — will refuse to narrow and push the **document** sideways instead.
+  `AppShell` lays the sidebar and `PageShell`'s `flex-1` `<main>` out as a flex
+  row from `lg` up, which is why `/teacher/classes` scrolled 135px at exactly
+  1024px until its `PageShell` was given `min-w-0`. Any future page that puts a
+  `min-width` inside `PageShell` needs the same, and the fix belongs on the page
+  rather than in the primitive until more than one page needs it.
 
 Additional standing constraints from the user, still in force:
 
