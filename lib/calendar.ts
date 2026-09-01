@@ -3,7 +3,7 @@ import "server-only";
 import type { Database } from "@/lib/database.types";
 import type { createClient } from "@/lib/supabase/server";
 import type { TeacherClassFields } from "@/lib/teacher";
-import { formatZonedTime, zonedCalendarDate } from "@/lib/time";
+import { formatZonedTime, minutesOfDay, zonedCalendarDate } from "@/lib/time";
 
 /**
  * The teaching week, assembled from the sessions that were actually scheduled.
@@ -195,16 +195,15 @@ export function shiftWeek(monday: string, weeks: number): string {
 }
 
 /**
- * `HH:mm` as minutes past midnight.
+ * Re-exported, not redefined.
  *
- * `% 24` because `Intl` renders midnight as "24:00" under an h24 locale and as
- * "00:00" under h23, and which one a runtime picks for `vi-VN` is not something
- * to bet a lesson's position on.
+ * `minutesOfDay` moved to `lib/time.ts` when the current-time indicator became
+ * a client component: this module is `server-only`, and the browser needs the
+ * same parse the server does. It is still named here because this is where the
+ * grid's arithmetic reads, and a second copy is the one thing that could put
+ * the line and the blocks on different clocks.
  */
-export function minutesOfDay(time: string): number {
-  const [hour, minute] = time.split(":").map(Number);
-  return (hour % 24) * 60 + minute;
-}
+export { minutesOfDay };
 
 /** Today, on the clock the classes actually meet on. */
 export function todayIn(zone: string): string {

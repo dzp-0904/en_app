@@ -1,17 +1,24 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { AttendanceButtons } from "@/components/attendance/status-buttons";
 import { SubmitButton } from "@/components/auth/submit-button";
 import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/components/ui/page-header";
 import { PageShell } from "@/components/ui/page-shell";
 import { Select } from "@/components/ui/select";
+import { Tabs, type TabItem } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { ATTENDANCE_LABELS } from "@/lib/attendance";
+import { loadSessionHomework, type SessionHomework } from "@/lib/homework";
 import {
   NOTE_MAX_LENGTH,
   PERFORMANCE_LABELS,
@@ -20,6 +27,14 @@ import {
   SKILLS,
   TOPIC_MAX_LENGTH,
 } from "@/lib/lesson-log";
+import {
+  formatBytes,
+  loadSessionMaterials,
+  materialTypeLabel,
+  MATERIAL_ACCEPT,
+  MAX_MATERIAL_BYTES,
+  type Material,
+} from "@/lib/materials";
 import { requireTeacher } from "@/lib/onboarding";
 import type { DynamicPageProps } from "@/lib/route-types";
 import {
@@ -34,6 +49,7 @@ import {
   SCORE_ENTRY_TYPES,
   SCORE_NOTE_MAX_LENGTH,
 } from "@/lib/score";
+import { HOMEWORK_STATUS_LABELS } from "@/lib/student";
 import { createClient } from "@/lib/supabase/server";
 import {
   loadClassBands,
@@ -54,10 +70,15 @@ import {
 } from "@/lib/time";
 
 import {
+  createHomework,
   createLessonLog,
   recordAttendance,
   recordScoreEntry,
+  removeHomework,
+  removeMaterial,
   removeScoreEntry,
+  updateSessionSchedule,
+  uploadMaterial,
 } from "../../actions";
 
 export const metadata: Metadata = {
@@ -65,7 +86,9 @@ export const metadata: Metadata = {
 };
 
 /**
- * One lesson, and who was there.
+ * One lesson, and everything a teacher does with it.
+ *
+ * ## Authorization, unchanged
  *
  * The page authorises in two steps, and both are queries rather than
  * comparisons. `loadEditableClass` filters `classes` by the authenticated
@@ -78,10 +101,66 @@ export const metadata: Metadata = {
  * `sessions` is a static segment, so `[sessionId]` can never swallow it, and
  * both loaders refuse anything that is not a uuid before making a round trip.
  *
- * Five reads: the class, the session, the active members, the marks for this
- * session, and this session's lesson notes. None of them is per student, and
- * the last two are one statement each however many rows they return.
+ * ## What M30 changed
+ *
+ * This page is now the destination of a click on the calendar, so it became the
+ * session's workspace rather than an attendance sheet with two extra sections.
+ * The four tabs the milestone names come first and in its order —
+ * Danh sách học sinh, Điểm danh, Bài tập, Giáo trình — and the two this page
+ * already had, Ghi chú and Band điểm, follow them. Neither was removed: they
+ * are working features with real tables behind them, and deleting one to match
+ * a tab list would be the opposite of fidelity. Band điểm is still absent for a
+ * class that is not band-scored, exactly as before.
+ *
+ * **Nothing under Điểm danh moved.** `components/attendance/status-buttons.tsx`
+ * is untouched, `recordAttendance` is untouched, and the form around them is the
+ * same bound Server Action with the same four submit buttons. The section
+ * changed panel; the mechanism did not.
+ *
+ * ## Tabs are links, and the loaders follow the tab
+ *
+ * `?tab=` selects the panel and every tab is a `<Link>`, so the workspace pages
+ * with JavaScript disabled and each panel is bookmarkable and in the back
+ * button — the same rule the class-detail tabs and the student dashboard follow.
+ * They are deliberately **not** prefetched: each tab's reads are gated on that
+ * tab being rendered, so prefetching would issue every query on every visit for
+ * panels the teacher may never open. `PendingTint` acknowledges the click
+ * instead.
+ *
+ * The class and the session are always read, because the header is made of
+ * them. Everything else is chosen by the tab and issued in one `Promise.all`:
+ * the roster for the three panels that name students, the standings and today's
+ * entries only for a band-scored class, homework and materials only when their
+ * own panel is open. A `null` from any of them is a failed read and says so;
+ * it is never rendered as "there is nothing here", because that is a claim this
+ * page may only make on an answer it actually got.
  */
+
+/** The panels, in the order the milestone asks for them. */
+const TABS = [
+  { key: "students", label: "Danh sách học sinh" },
+  { key: "attendance", label: "Điểm danh" },
+  { key: "homework", label: "Bài tập" },
+  { key: "materials", label: "Giáo trình" },
+  { key: "notes", label: "Ghi chú" },
+  { key: "bands", label: "Band điểm" },
+] as const;
+
+type TabKey = (typeof TABS)[number]["key"];
+
+/**
+ * Anything unrecognised falls back to the first panel rather than erroring, and
+ * `bands` falls back too when the class has no band scale — a General English
+ * class has no such tab to select, and `?tab=bands` must not produce an empty
+ * page with no way out of it.
+ */
+function readTab(value: unknown, banded: boolean): TabKey {
+  const found = TABS.find((tab) => tab.key === value);
+  if (!found) return "students";
+  if (found.key === "bands" && !banded) return "students";
+  return found.key;
+}
+
 export default async function SessionPage({
   params,
   searchParams,
@@ -131,12 +210,6 @@ export default async function SessionPage({
   const { fields } = owned;
   const { session } = found;
 
-  // Separately from the lesson itself, so that a failure here costs the
-  // attendance list and nothing else — the lesson's own facts still render.
-  // `null` is that failure and is deliberately not `[]`: "no students are
-  // enrolled" is a claim this page may only make on an answer it actually got.
-  // The notes answer to nothing the roster says, so the two go out together
-  // rather than one waiting on the other.
   // `score_entries` has no `session_id` — it hangs off a membership and a
   // `recorded_on date` — so "this lesson's entries" means the entries dated to
   // the day this lesson happened on, read on the class's own clock by the same
@@ -144,20 +217,50 @@ export default async function SessionPage({
   const banded = isBandScored(fields.courseType);
   const recordedOn = zonedCalendarDate(fields.timezone, session.startsAt);
 
-  // Two more reads, and only for a class that keeps bands at all. Both are one
-  // statement however many students the class has, and both are skipped
-  // entirely for a General English class, which has no band scale by design.
-  const [attendees, notes, standings, entries] = await Promise.all([
-    loadSessionAttendance(supabase, classId, sessionId),
-    loadSessionLessonNotes(supabase, classId, sessionId),
-    banded ? loadClassBands(supabase, classId) : Promise.resolve(null),
-    banded
-      ? loadScoreEntriesOn(supabase, classId, recordedOn)
-      : Promise.resolve(null),
-  ]);
-
   const query = await searchParams;
   const error = typeof query.error === "string" ? query.error : undefined;
+  const tab = readTab(
+    typeof query.tab === "string" ? query.tab : undefined,
+    banded,
+  );
+
+  // The roster answers for three panels; the rest answer for one each. Every
+  // read that is not needed by the open tab is skipped rather than discarded,
+  // which is the same gating M19 applied to `loadClassSessions`.
+  const wantsRoster =
+    tab === "students" || tab === "attendance" || tab === "notes" || tab === "bands";
+  const wantsStandings = banded && (tab === "students" || tab === "bands");
+
+  const [attendees, notes, standings, entries, homework, materials] =
+    await Promise.all([
+      wantsRoster
+        ? loadSessionAttendance(supabase, classId, sessionId)
+        : Promise.resolve(null),
+      tab === "notes"
+        ? loadSessionLessonNotes(supabase, classId, sessionId)
+        : Promise.resolve(null),
+      wantsStandings
+        ? loadClassBands(supabase, classId)
+        : Promise.resolve(null),
+      banded && tab === "bands"
+        ? loadScoreEntriesOn(supabase, classId, recordedOn)
+        : Promise.resolve(null),
+      tab === "homework"
+        ? loadSessionHomework(supabase, classId, sessionId)
+        : Promise.resolve(null),
+      tab === "materials"
+        ? loadSessionMaterials(supabase, classId, sessionId)
+        : Promise.resolve(null),
+    ]);
+
+  const base = `/teacher/${classId}/sessions/${sessionId}`;
+  const items: TabItem[] = TABS.filter(
+    (entry) => entry.key !== "bands" || banded,
+  ).map((entry) => ({
+    label: entry.label,
+    href: entry.key === "students" ? base : `${base}?tab=${entry.key}`,
+    current: entry.key === tab,
+  }));
 
   return (
     <Frame className={fields.className}>
@@ -170,7 +273,12 @@ export default async function SessionPage({
           The date and the times are read on the class's own clock, by the same
           two functions the lesson list uses. See `lib/time.ts`. They are two
           metadata nodes rather than one `·`-joined string so a narrow screen
-          wraps between the date and the times instead of inside either. */}
+          wraps between the date and the times instead of inside either.
+
+          The calendar is now the way most teachers arrive here, so it gets an
+          explicit way back. It is an action rather than a fourth crumb because
+          the trail says where this lesson *lives* — in its class — and the
+          calendar is where the teacher happened to come from. */}
       <PageHeader
         breadcrumb={[
           { label: "Lớp học", href: "/teacher/classes" },
@@ -182,6 +290,11 @@ export default async function SessionPage({
           formatZonedDate(fields.timezone, session.startsAt),
           `${formatZonedTime(fields.timezone, session.startsAt)} – ${formatZonedTime(fields.timezone, session.endsAt)}`,
         ]}
+        actions={
+          <Button asChild variant="outline" size="sm" className="relative">
+            <Link href="/teacher/calendar">Quay lại Lịch dạy</Link>
+          </Button>
+        }
       />
 
       {/* Only when it is not the default this application creates. Nothing here
@@ -196,48 +309,631 @@ export default async function SessionPage({
 
       {error ? <Alert className="mb-6">{error}</Alert> : null}
 
-      <h2 className="mt-4 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Điểm danh
-      </h2>
+      <ScheduleEditor
+        classId={classId}
+        sessionId={sessionId}
+        date={recordedOn}
+        startTime={formatZonedTime(fields.timezone, session.startsAt)}
+        endTime={formatZonedTime(fields.timezone, session.endsAt)}
+      />
 
-      {attendees === null ? (
+      <Tabs
+        items={items}
+        label="Các mục của buổi học"
+        className="mt-6 mb-6"
+      />
+
+      {tab === "students" ? (
+        <StudentsPanel attendees={attendees} standings={standings} />
+      ) : null}
+
+      {tab === "attendance" ? (
+        <AttendancePanel
+          attendees={attendees}
+          classId={classId}
+          sessionId={sessionId}
+        />
+      ) : null}
+
+      {tab === "homework" ? (
+        <HomeworkPanel
+          homework={homework}
+          classId={classId}
+          sessionId={sessionId}
+        />
+      ) : null}
+
+      {tab === "materials" ? (
+        <MaterialsPanel
+          materials={materials}
+          classId={classId}
+          sessionId={sessionId}
+        />
+      ) : null}
+
+      {tab === "notes" ? (
+        <NotesPanel
+          notes={notes}
+          attendees={attendees}
+          classId={classId}
+          sessionId={sessionId}
+        />
+      ) : null}
+
+      {tab === "bands" && banded ? (
+        <BandsPanel
+          attendees={attendees}
+          standings={standings}
+          entries={entries}
+          classId={classId}
+          sessionId={sessionId}
+        />
+      ) : null}
+    </Frame>
+  );
+}
+
+/**
+ * Moving the lesson without a pointer.
+ *
+ * The calendar lets a teacher drag a block from one day to another, and the
+ * milestone is explicit that a drag "must NOT be the only mechanism for moving
+ * a session". This is the other one, and it is the better one: a plain form on
+ * a page reached by a plain link, so it works with a keyboard, with a screen
+ * reader, on a touch screen where dragging a 12px block is unreasonable, and
+ * with JavaScript switched off — none of which is true of a drag. It also does
+ * more than the drag can, because it takes the two times as well as the day.
+ *
+ * A `<details>` rather than an always-open form: the schedule is right, almost
+ * always, and a page whose first control is "change this" invites changing it.
+ * `<details>` opens natively with no script at all, which is the only kind of
+ * disclosure this application uses.
+ *
+ * `updateSessionSchedule` re-derives the teacher, the class and the session on
+ * the server and shares its write with the drag — one validation, one
+ * conversion, one statement — so the two paths cannot disagree about what a
+ * move means.
+ */
+function ScheduleEditor({
+  classId,
+  sessionId,
+  date,
+  startTime,
+  endTime,
+}: {
+  classId: string;
+  sessionId: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+}) {
+  return (
+    <details className="mt-4 rounded-xl border border-border bg-card px-5 py-4">
+      <summary className="cursor-pointer list-none text-sm font-medium text-foreground outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+        Lịch buổi học — sửa ngày, giờ
+      </summary>
+
+      <form
+        action={updateSessionSchedule.bind(null, classId, sessionId)}
+        className="mt-4 space-y-4"
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="schedule-date">Ngày</Label>
+            <Input
+              id="schedule-date"
+              name="date"
+              type="date"
+              defaultValue={date}
+              required
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="schedule-start">Giờ bắt đầu</Label>
+            <Input
+              id="schedule-start"
+              name="start_time"
+              type="time"
+              defaultValue={startTime}
+              required
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="schedule-end">Giờ kết thúc</Label>
+            <Input
+              id="schedule-end"
+              name="end_time"
+              type="time"
+              defaultValue={endTime}
+              required
+            />
+          </div>
+        </div>
+
+        <SubmitButton pendingLabel="Đang lưu…">Lưu lịch</SubmitButton>
+      </form>
+    </details>
+  );
+}
+
+/**
+ * Tab 1 — who is in this class.
+ *
+ * The roster of the *selected class*, read by `loadSessionAttendance`, which
+ * filters `class_members` by `class_id` and by the two state columns that mean
+ * "currently enrolled". A student of another class cannot appear here: there is
+ * no id from the request anywhere in that query, and
+ * `class_members_teacher_all` scopes it to this teacher's classes underneath.
+ *
+ * Name, email and — for a band-scored class — the standing the database already
+ * computes. Nothing is derived on this page. There is no attendance rate, no
+ * homework percentage and no invented metric of any kind: `v_member_current_band`
+ * and `v_member_performance_status` are the only opinions expressed here, and
+ * they are the same ones the class page and the student's own screen show.
+ */
+function StudentsPanel({
+  attendees,
+  standings,
+}: {
+  attendees: SessionAttendee[] | null;
+  standings: Map<string, MemberBands> | null;
+}) {
+  if (attendees === null) {
+    return (
+      <Alert>
+        Chúng tôi chưa tải được danh sách học viên của lớp này. Vui lòng tải lại
+        trang.
+      </Alert>
+    );
+  }
+
+  if (attendees.length === 0) {
+    return (
+      <EmptyState
+        title="Lớp này chưa có học viên nào"
+        description="Mời học viên từ trang lớp học để họ xuất hiện ở đây."
+      />
+    );
+  }
+
+  return (
+    <ul className="space-y-3">
+      {attendees.map((attendee) => (
+        <li key={attendee.membershipId}>
+          <Card variant="list">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="font-semibold break-words text-foreground">
+                  {attendee.name ?? attendee.email ?? "Học viên chưa có tên"}
+                </h3>
+                {attendee.name && attendee.email ? (
+                  <p className="mt-0.5 text-sm break-words text-muted-foreground">
+                    {attendee.email}
+                  </p>
+                ) : null}
+              </div>
+
+              {/* The mark this lesson already carries, so the list of who is in
+                  the class also says who was here — the same value the Điểm
+                  danh tab writes, read from the same row. "Chưa ghi nhận" is a
+                  state of its own and never `absent`. */}
+              <Badge tone="neutral">
+                {attendee.attendance
+                  ? ATTENDANCE_LABELS[attendee.attendance]
+                  : "Chưa ghi nhận"}
+              </Badge>
+            </div>
+
+            {standings ? (
+              <Standing bands={standings.get(attendee.membershipId) ?? null} />
+            ) : null}
+          </Card>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Tab 2 — the attendance sheet, moved into a panel and otherwise untouched.
+ *
+ * Same `Attendee` component, same bound `recordAttendance`, same
+ * `AttendanceButtons`. M12's optimistic `useFormStatus().data` mechanism and its
+ * no-JavaScript fallback of one form with four submit buttons are exactly as
+ * they were; this function only decides which of the three states to render.
+ */
+function AttendancePanel({
+  attendees,
+  classId,
+  sessionId,
+}: {
+  attendees: SessionAttendee[] | null;
+  classId: string;
+  sessionId: string;
+}) {
+  if (attendees === null) {
+    return (
+      <Alert>
+        Chúng tôi chưa tải được danh sách học viên của lớp này. Vui lòng tải lại
+        trang.
+      </Alert>
+    );
+  }
+
+  if (attendees.length === 0) {
+    return (
+      <EmptyState
+        title="Lớp này chưa có học viên nào"
+        description="Điểm danh cần ít nhất một học viên trong lớp."
+      />
+    );
+  }
+
+  return (
+    <ul className="space-y-3">
+      {attendees.map((attendee) => (
+        <li key={attendee.membershipId}>
+          <Card>
+            <Attendee
+              attendee={attendee}
+              classId={classId}
+              sessionId={sessionId}
+            />
+          </Card>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Tab 3 — the homework set for this lesson.
+ *
+ * `homework_assignments` has carried a nullable `session_id` bound to its class
+ * by a composite foreign key since the foundation commit, so the relationship
+ * this panel needs already existed and nothing was invented for it. Creating an
+ * assignment also writes one `homework_submissions` row per active member —
+ * see `createHomework`, and `public.submit_homework()`, which raises rather
+ * than inserting when no row is waiting for the student.
+ *
+ * The tally is four counts and not a percentage, because `public.homework_status`
+ * distinguishes a student who has not started from one who missed the deadline
+ * and collapsing them would throw that away.
+ */
+function HomeworkPanel({
+  homework,
+  classId,
+  sessionId,
+}: {
+  homework: SessionHomework[] | null;
+  classId: string;
+  sessionId: string;
+}) {
+  return (
+    <>
+      {homework === null ? (
         <Alert>
-          Chúng tôi chưa tải được danh sách học viên của lớp này. Vui lòng
-          tải lại trang.
+          Chúng tôi chưa tải được bài tập của buổi học này. Vui lòng tải lại
+          trang.
         </Alert>
-      ) : attendees.length === 0 ? (
-        <Card>
+      ) : homework.length === 0 ? (
+        <Card variant="list">
           <p className="text-sm text-muted-foreground">
-            Lớp này hiện chưa có học viên nào.
+            Buổi học này chưa có bài tập nào.
           </p>
         </Card>
       ) : (
         <ul className="space-y-3">
-          {attendees.map((attendee) => (
-            <li key={attendee.membershipId}>
-              <Card>
-                <Attendee
-                  attendee={attendee}
-                  classId={classId}
-                  sessionId={sessionId}
-                />
+          {homework.map((item) => (
+            <li key={item.assignmentId}>
+              <Card variant="list">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="font-semibold break-words text-foreground">
+                      {item.title}
+                    </h3>
+                    <p className="mt-0.5 text-sm text-muted-foreground">
+                      {SKILL_LABELS[item.skill]}
+                      {item.dueDate ? ` · Hạn nộp ${item.dueDate}` : ""}
+                      {` · Điểm tối đa ${item.maxScore}`}
+                    </p>
+                  </div>
+
+                  <form
+                    action={removeHomework.bind(
+                      null,
+                      classId,
+                      sessionId,
+                      item.assignmentId,
+                    )}
+                  >
+                    <SubmitButton
+                      pendingLabel="Đang xóa…"
+                      className="border border-destructive/30 bg-card px-3 py-1.5 text-xs font-medium text-destructive hover:bg-background"
+                    >
+                      Xóa
+                    </SubmitButton>
+                  </form>
+                </div>
+
+                {item.description ? (
+                  <p className="mt-3 text-sm break-words whitespace-pre-line text-foreground">
+                    {item.description}
+                  </p>
+                ) : null}
+
+                {item.total === 0 ? (
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    Chưa giao cho học viên nào.
+                  </p>
+                ) : (
+                  <ul className="mt-3 flex flex-wrap gap-2">
+                    {(
+                      ["assigned", "submitted", "graded", "missed"] as const
+                    ).map((status) => (
+                      <li key={status}>
+                        <Badge tone="neutral">
+                          {HOMEWORK_STATUS_LABELS[status]} {item.counts[status]}
+                        </Badge>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </Card>
             </li>
           ))}
         </ul>
       )}
 
-      <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Ghi chú buổi học
-      </h2>
+      <Card className="mt-3">
+        <HomeworkForm classId={classId} sessionId={sessionId} />
+      </Card>
+    </>
+  );
+}
 
+/**
+ * The form that sets one.
+ *
+ * `assigned_on`, `class_id`, `session_id` and `created_by` are not fields here.
+ * All four are derived on the server — the lesson's own date on the class's
+ * clock, the two proved ids, and the teacher in the session cookie — because a
+ * field the browser could set is a field the browser could lie about.
+ *
+ * `max_score` defaults to 10 because `homework_assignments.max_score` does, and
+ * the skill defaults to `general`, the enum's own value for "not one skill in
+ * particular".
+ */
+function HomeworkForm({
+  classId,
+  sessionId,
+}: {
+  classId: string;
+  sessionId: string;
+}) {
+  return (
+    <form
+      action={createHomework.bind(null, classId, sessionId)}
+      className="space-y-4"
+    >
+      <div className="space-y-1.5">
+        <Label htmlFor="homework-title">Tên bài tập</Label>
+        <Input
+          id="homework-title"
+          name="title"
+          type="text"
+          maxLength={300}
+          placeholder="Nội dung bài tập về nhà"
+          required
+        />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="homework-skill">Kỹ năng</Label>
+          <Select
+            id="homework-skill"
+            name="skill"
+            defaultValue="general"
+            required
+          >
+            {SKILLS.map((skill) => (
+              <option key={skill} value={skill}>
+                {SKILL_LABELS[skill]}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="homework-due">Hạn nộp</Label>
+          <Input id="homework-due" name="due_date" type="date" />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="homework-max">Điểm tối đa</Label>
+          <Input
+            id="homework-max"
+            name="max_score"
+            type="number"
+            min="0.1"
+            max="999.9"
+            step="0.1"
+            defaultValue="10"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="homework-description">Mô tả</Label>
+        <Textarea
+          id="homework-description"
+          name="description"
+          rows={3}
+          maxLength={NOTE_MAX_LENGTH}
+          placeholder="Không bắt buộc — hướng dẫn cho học viên"
+        />
+      </div>
+
+      <SubmitButton pendingLabel="Đang giao bài tập…" className="mt-6 w-full">
+        Giao bài tập
+      </SubmitButton>
+    </form>
+  );
+}
+
+/**
+ * Tab 4 — the curriculum files attached to this lesson.
+ *
+ * ## Storage, and why there is a migration
+ *
+ * There was no file storage in this application at all before M30: no bucket,
+ * no upload helper, no metadata table, nothing in fifteen migrations and
+ * nothing in `app/`, `lib/` or `components/`. So the smallest secure thing
+ * consistent with the existing architecture was designed —
+ * `supabase/migrations/20260901000100_class_materials.sql`, a **private**
+ * bucket plus one `class_materials` table with the same teacher-scoped RLS
+ * shape every other table here uses. It is written but deliberately **not
+ * applied**; until a human runs it this panel renders the ordinary failed-read
+ * alert, which is the honest thing for a page to do about a table that is not
+ * there yet.
+ *
+ * ## The file never becomes a public URL
+ *
+ * The bucket is private, the storage policies key on the class id being the
+ * first path segment and on `app.my_class_ids()`, and the object path is a
+ * `crypto.randomUUID()` under the class — not the filename, so nothing is
+ * guessable from a name a teacher typed. A download goes through
+ * `app/teacher/[classId]/materials/[materialId]/route.ts`, which re-proves the
+ * teacher and reads the path *out of the row* before asking the object store
+ * for a sixty-second signed URL. There is no service-role key in this path, or
+ * anywhere in this application.
+ *
+ * Nothing parses, indexes, summarises or otherwise processes the file. It is
+ * stored and it is handed back.
+ */
+function MaterialsPanel({
+  materials,
+  classId,
+  sessionId,
+}: {
+  materials: Material[] | null;
+  classId: string;
+  sessionId: string;
+}) {
+  return (
+    <>
+      {materials === null ? (
+        <Alert>
+          Chúng tôi chưa tải được giáo trình của buổi học này. Vui lòng tải lại
+          trang.
+        </Alert>
+      ) : materials.length === 0 ? (
+        <Card variant="list">
+          <p className="text-sm text-muted-foreground">
+            Buổi học này chưa có tài liệu nào.
+          </p>
+        </Card>
+      ) : (
+        <ul className="space-y-3">
+          {materials.map((material) => (
+            <li key={material.materialId}>
+              <Card variant="list">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    {/* A real link to a real route: click, middle-click,
+                        keyboard and no-JavaScript all work, which a scripted
+                        download button cannot claim. */}
+                    <Link
+                      href={`/teacher/${classId}/materials/${material.materialId}`}
+                      className="relative font-semibold break-words text-primary underline-offset-4 outline-none hover:underline focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                    >
+                      {material.fileName}
+                    </Link>
+                    <p className="mt-0.5 text-sm text-muted-foreground">
+                      {materialTypeLabel(material.mimeType, material.fileName)} ·{" "}
+                      {formatBytes(material.byteSize)}
+                    </p>
+                  </div>
+
+                  <form
+                    action={removeMaterial.bind(
+                      null,
+                      classId,
+                      sessionId,
+                      material.materialId,
+                    )}
+                  >
+                    <SubmitButton
+                      pendingLabel="Đang xóa…"
+                      className="border border-destructive/30 bg-card px-3 py-1.5 text-xs font-medium text-destructive hover:bg-background"
+                    >
+                      Xóa
+                    </SubmitButton>
+                  </form>
+                </div>
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Card className="mt-3">
+        <form
+          action={uploadMaterial.bind(null, classId, sessionId)}
+          encType="multipart/form-data"
+          className="space-y-4"
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor="material-file">Tệp giáo trình</Label>
+            <Input
+              id="material-file"
+              name="file"
+              type="file"
+              accept={MATERIAL_ACCEPT}
+              required
+            />
+            {/* `accept` is a hint the browser may ignore and a POST is not a
+                form, so the server checks the type and the size again. This
+                line is what the teacher is told beforehand. */}
+            <p className="text-xs text-muted-foreground">
+              PDF, Word, Excel hoặc PowerPoint, tối đa{" "}
+              {formatBytes(MAX_MATERIAL_BYTES)}.
+            </p>
+          </div>
+
+          <SubmitButton pendingLabel="Đang tải lên…" className="mt-6 w-full">
+            Tải giáo trình lên
+          </SubmitButton>
+        </form>
+      </Card>
+    </>
+  );
+}
+
+/** Tab 5 — the lesson notes this page already carried, in a panel of their own. */
+function NotesPanel({
+  notes,
+  attendees,
+  classId,
+  sessionId,
+}: {
+  notes: LessonNote[] | null;
+  attendees: SessionAttendee[] | null;
+  classId: string;
+  sessionId: string;
+}) {
+  return (
+    <>
       {notes === null ? (
         <Alert>
           Chúng tôi chưa tải được ghi chú của buổi học này. Vui lòng tải lại
           trang.
         </Alert>
       ) : notes.length === 0 ? (
-        <Card>
+        <Card variant="list">
           <p className="text-sm text-muted-foreground">
             Chưa có ghi chú nào được thêm.
           </p>
@@ -255,8 +951,14 @@ export default async function SessionPage({
       )}
 
       {/* A note names a student, so there is nothing to write until the class
-          has one. The attendance block above has already said why. */}
-      {attendees && attendees.length > 0 ? (
+          has one. A failed roster read is reported rather than silently
+          removing the form. */}
+      {attendees === null ? (
+        <Alert className="mt-3">
+          Chúng tôi chưa tải được danh sách học viên của lớp này. Vui lòng tải
+          lại trang.
+        </Alert>
+      ) : attendees.length > 0 ? (
         <Card className="mt-3">
           <NoteForm
             attendees={attendees}
@@ -265,61 +967,68 @@ export default async function SessionPage({
           />
         </Card>
       ) : null}
+    </>
+  );
+}
 
-      {/* Only IELTS classes are scored on the band scale — `scoringModelFor` is
-          the rule, and `classes_no_target_band_when_unscored` is the schema
-          agreeing. A General English class gets no section, and
-          `recordScoreEntry` refuses one anyway. */}
-      {banded ? (
-        <>
-          <h2 className="mt-10 mb-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            Band điểm
-          </h2>
+/**
+ * Tab 6 — the band panel, and only for a class that keeps bands at all.
+ *
+ * `scoringModelFor` is the rule and `classes_no_target_band_when_unscored` is
+ * the schema agreeing. A General English class gets no tab, `readTab` refuses
+ * `?tab=bands` for it, and `recordScoreEntry` refuses the write underneath.
+ */
+function BandsPanel({
+  attendees,
+  standings,
+  entries,
+  classId,
+  sessionId,
+}: {
+  attendees: SessionAttendee[] | null;
+  standings: Map<string, MemberBands> | null;
+  entries: ScoreEntry[] | null;
+  classId: string;
+  sessionId: string;
+}) {
+  if (standings === null || entries === null || attendees === null) {
+    return (
+      <Alert>
+        Chúng tôi chưa tải được band điểm của lớp này. Vui lòng tải lại trang.
+      </Alert>
+    );
+  }
 
-          {standings === null || entries === null ? (
-            <Alert>
-              Chúng tôi chưa tải được band điểm của lớp này. Vui lòng tải
-              lại trang.
-            </Alert>
-          ) : attendees === null ? null : (
-            <>
-              {attendees.length === 0 && entries.length === 0 ? (
-                <Card>
-                  <p className="text-sm text-muted-foreground">
-                    Lớp này hiện chưa có học viên nào.
-                  </p>
-                </Card>
-              ) : (
-                <ul className="space-y-3">
-                  {bandRows(attendees, standings, entries).map((row) => (
-                    <li key={row.membershipId}>
-                      <Card>
-                        <BandRow
-                          row={row}
-                          classId={classId}
-                          sessionId={sessionId}
-                        />
-                      </Card>
-                    </li>
-                  ))}
-                </ul>
-              )}
+  return (
+    <>
+      {attendees.length === 0 && entries.length === 0 ? (
+        <EmptyState
+          title="Lớp này chưa có học viên nào"
+          description="Band điểm được ghi nhận cho từng học viên trong lớp."
+        />
+      ) : (
+        <ul className="space-y-3">
+          {bandRows(attendees, standings, entries).map((row) => (
+            <li key={row.membershipId}>
+              <Card>
+                <BandRow row={row} classId={classId} sessionId={sessionId} />
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
 
-              {/* An entry names a student, like a note does. */}
-              {attendees.length > 0 ? (
-                <Card className="mt-3">
-                  <ScoreForm
-                    attendees={attendees}
-                    classId={classId}
-                    sessionId={sessionId}
-                  />
-                </Card>
-              ) : null}
-            </>
-          )}
-        </>
+      {/* An entry names a student, like a note does. */}
+      {attendees.length > 0 ? (
+        <Card className="mt-3">
+          <ScoreForm
+            attendees={attendees}
+            classId={classId}
+            sessionId={sessionId}
+          />
+        </Card>
       ) : null}
-    </Frame>
+    </>
   );
 }
 
@@ -843,8 +1552,9 @@ function ScoreForm({
  * One band picker. Empty is the default, and it means "not measured".
  *
  * Every control in this form carries a `band-` prefixed `id` while keeping the
- * column's own `name`. The lesson-note form above it already owns `note`, and
- * two elements with one id is two labels pointing at the same control.
+ * column's own `name`. The lesson-note form already owns `note` on its own
+ * panel, and two elements with one id is two labels pointing at the same
+ * control.
  */
 function BandField({ field }: { field: (typeof BAND_FIELDS)[number] }) {
   return (

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { SessionDrag } from "@/components/calendar/session-drag";
 import { WeekGrid, type ClassMeta } from "@/components/calendar/week-grid";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,15 @@ export const metadata: Metadata = {
  * `Promise.all`, so the student count on a lesson block costs no extra
  * wall-clock. The class list itself is not read at all — M24 put it on
  * `TeacherContext` precisely so pages like this one would stop asking for it.
+ *
+ * M30 WRAPPED THE GRID, NOT REPLACED IT. `SessionDrag` is a client component
+ * that adds four drag listeners and one hidden form around the same
+ * server-rendered week; the grid, the columns and every lesson block are still
+ * produced here, on the server, and every block is still a real `<a href>`. The
+ * drag is an enhancement — with JavaScript off, `SessionDrag` renders its
+ * children, one hint line and nothing else, and the calendar behaves exactly as
+ * it did before. Moving a lesson without a pointer is the date and time form on
+ * the session's own page, which the hint names.
  */
 
 /** `?week=` is the only parameter, and it is validated before use. */
@@ -225,16 +235,19 @@ export default async function TeacherCalendarPage({
         // An empty week still gets its grid. A calendar that vanishes when
         // nothing is booked is not a calendar; the week is said in the header
         // instead, where the month already is.
-        <WeekGrid
-          days={days}
-          sessions={sessions}
-          tones={tones}
-          meta={meta}
-          today={now.date}
-          nowMinutes={now.minutes}
-          startHour={startHour}
-          endHour={endHour}
-        />
+        <SessionDrag>
+          <WeekGrid
+            days={days}
+            sessions={sessions}
+            tones={tones}
+            meta={meta}
+            zone={zone}
+            today={now.date}
+            nowMinutes={now.minutes}
+            startHour={startHour}
+            endHour={endHour}
+          />
+        </SessionDrag>
       )}
     </PageShell>
   );

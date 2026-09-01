@@ -34,7 +34,14 @@ import {
   type ClassSession,
   type TeacherClassFields,
 } from "@/lib/teacher";
-import { instantOf, zonedCalendarDate } from "@/lib/time";
+import {
+  isAllowedMaterial,
+  loadMaterial,
+  materialStoragePath,
+  MATERIALS_BUCKET,
+  MAX_MATERIAL_BYTES,
+} from "@/lib/materials";
+import { formatZonedTime, instantOf, zonedCalendarDate } from "@/lib/time";
 
 /**
  * Everything a teacher does to one class from its own page: manage the roster —
@@ -1178,4 +1185,638 @@ export async function removeScoreEntry(
 
   revalidatePath(sessionPath);
   redirect(sessionPath);
+}
+
+/* ==========================================================================
+ * M30 — the session workspace: moving a lesson, setting homework, and
+ * attaching curriculum material.
+ *
+ * Everything below goes through `authoriseClass` or `authoriseSession`, the two
+ * gates the rest of this file already uses. Nothing new was invented for the
+ * calendar: a drag ends in the same chain a click on the same session's page
+ * would, and it ends there on the server.
+ * ========================================================================== */
+
+/**
+ * The shape a calendar move reports back with.
+ *
+ * `null` is "nothing has been attempted", which is what `useActionState` starts
+ * from. A message is a refusal the teacher can act on; success is silent,
+ * because the revalidated grid showing the lesson on its new day is the
+ * feedback, and a banner saying so would still be on screen a minute later.
+ */
+export type MoveResult = { error: string } | { ok: true } | null;
+
+/**
+ * Rewrites one session's start and end, on the class's own clock.
+ *
+ * The core both entry points share, so the drag on the calendar and the date
+ * field on the session page cannot diverge — one validation, one conversion,
+ * one statement, one set of error wording.
+ *
+ * ## Duration is carried in milliseconds, not recomputed from a wall clock
+ *
+ * `endsAt - startsAt` is an exact interval between two instants. Reading the
+ * old end as "20:45" and re-applying it to the new date would instead give a
+ * lesson a different length on the two days a year a zone changes offset. The
+ * interval is what a teacher means by "the same lesson, a day later", so the
+ * interval is what is preserved. `instantOf` resolves the new start on
+ * `classes.timezone` — see `lib/time.ts` for why that is not `new Date(...)`.
+ *
+ * ## The one consequence worth knowing about
+ *
+ * `score_entries` has no `session_id`: §6 of the project's memory records that
+ * "this lesson's entries" means entries whose `recorded_on` is the day the
+ * lesson happened on. Attendance, lesson notes, homework and materials all hang
+ * off `session_id` and follow the session wherever it goes; score entries do
+ * not, so moving a session that already has marks recorded against its old date
+ * leaves those marks on the old date. Nothing is deleted and nothing is
+ * silently rewritten — a second table would have to be edited to "fix" it, and
+ * guessing which entries belong to a lesson is exactly the derivation this
+ * application keeps refusing to make.
+ */
+async function rescheduleSession(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  classId: string,
+  session: ClassSession,
+  timezone: string,
+  date: string,
+  startTime: string,
+  durationMs: number,
+): Promise<{ error: string } | { ok: true }> {
+  const startsAt = instantOf(timezone, date, startTime);
+  const endsAt = new Date(startsAt.getTime() + durationMs);
+
+  // Mirrors `class_sessions_ends_after_starts`. Unreachable from a preserved
+  // duration, which is always positive, but the shared core is also what the
+  // edit form calls and that form can be given two times.
+  if (endsAt.getTime() <= startsAt.getTime()) {
+    return { error: "Giờ kết thúc phải sau giờ bắt đầu." };
+  }
+
+  const { data, error } = await supabase
+    .from("class_sessions")
+    .update({
+      starts_at: startsAt.toISOString(),
+      ends_at: endsAt.toISOString(),
+    })
+    .eq("id", session.sessionId)
+    // The class is in the WHERE clause as well as the session, exactly as every
+    // other write in this file has it: `class_sessions_teacher_all` is the
+    // enforcement, and this is the statement agreeing with it rather than
+    // relying on it alone.
+    .eq("class_id", classId)
+    .select("id");
+
+  if (error) {
+    // `class_sessions_class_starts_key` is unique over (class_id, starts_at).
+    // Checking first would be a second query and a race; the constraint stays
+    // the enforcement and this is only its wording.
+    if (error.code === "23505") {
+      return { error: "Lớp này đã có một buổi học bắt đầu vào giờ đó." };
+    }
+
+    logDbError("class_sessions.update(schedule)", error);
+    return {
+      error: "Chúng tôi chưa chuyển được buổi học này. Vui lòng thử lại.",
+    };
+  }
+
+  if (!data || data.length === 0) {
+    return { error: "Buổi học này không còn tồn tại. Vui lòng tải lại trang." };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Moves one session to another day, keeping its time of day and its length.
+ *
+ * ## What a drag actually moves
+ *
+ * One `class_sessions` row, and nothing else. The milestone asks that a drag
+ * "must not silently change a recurring schedule unless the model defines it
+ * that way", so the model was read first: there is no recurring entity in this
+ * schema at all. `classes.schedule_note` is free text the migration's own
+ * comment labels display-only, and `class_sessions` is authoritative for when a
+ * class actually meets. A block on the calendar is therefore exactly one
+ * lesson, and moving it moves exactly that lesson. The schedule sentence on the
+ * class is untouched, because it never generated these rows in the first place.
+ *
+ * ## Why this one returns instead of redirecting
+ *
+ * Every other action in this file ends in `failTo(...)`, which redirects with
+ * `?error=` in the query string. That is right for a page whose form the
+ * teacher submitted and is looking at; it is wrong here. A drag is transient,
+ * and a failure that writes itself into the URL survives the reload, the
+ * bookmark and the Back button that follow it. So the refusal comes back as a
+ * value, the client component renders it beside the grid, and the next
+ * successful move clears it. The hard refusals still behave like the rest of
+ * the file: `authoriseSession` calls `notFound()` for a class or a session this
+ * teacher does not own, and those two are deliberately indistinguishable.
+ *
+ * ## The ids come off the form, and that is not a weakness
+ *
+ * A single hidden form serves every block on the grid, so `classId` and
+ * `sessionId` arrive as submitted values rather than bound arguments. They
+ * select a row; they do not grant one. `authoriseSession` re-derives the
+ * teacher from the session cookie, resolves the class through
+ * `loadEditableClass`'s `teacher_id` filter, and then finds the session with
+ * both `id` and `class_id` in the WHERE clause — so a forged pair reaches a 404
+ * before a date is read, and `class_sessions_teacher_all` refuses the statement
+ * underneath even if it did not.
+ *
+ * There is no optimistic update anywhere in this path. The block does not move
+ * until the server has written the row and the page has been revalidated, which
+ * is what keeps the calendar from ever showing a lesson on a day the database
+ * disagrees with.
+ */
+export async function moveSessionToDate(
+  _previous: MoveResult,
+  formData: FormData,
+): Promise<MoveResult> {
+  const classId = readText(formData, "classId");
+  const sessionId = readText(formData, "sessionId");
+
+  // Shape only. Ownership is `authoriseSession`'s answer, one line down.
+  if (!isUuid(classId) || !isUuid(sessionId)) {
+    notFound();
+  }
+
+  const { supabase, session, timezone } = await authoriseSession(
+    classId,
+    sessionId,
+  );
+
+  const date = readCalendarDate(readText(formData, "date"));
+
+  if (!date) {
+    return { error: "Ngày không hợp lệ. Vui lòng thử lại." };
+  }
+
+  // Dropping a lesson back on the day it is already on is a no-op, not a
+  // failure — and not a write either.
+  if (zonedCalendarDate(timezone, session.startsAt) === date) {
+    return { ok: true };
+  }
+
+  const result = await rescheduleSession(
+    supabase,
+    classId,
+    session,
+    timezone,
+    date,
+    formatZonedTime(timezone, session.startsAt),
+    new Date(session.endsAt).getTime() - new Date(session.startsAt).getTime(),
+  );
+
+  if ("error" in result) return result;
+
+  // The calendar, the class page's lesson list, the dashboard and the session's
+  // own page all read this row. `"layout"` is what `createSession` already uses
+  // for the same reason.
+  revalidatePath("/teacher", "layout");
+  return { ok: true };
+}
+
+/**
+ * The keyboard's way to do what a drag does — and rather more.
+ *
+ * The milestone is explicit that "drag/drop must NOT be the only mechanism for
+ * moving a session", so the session's own page carries a real form with a date
+ * and two times. It is a plain `<form action={...}>` on a page reached by a
+ * plain link, so it works with a keyboard, with a screen reader, and with
+ * JavaScript disabled, none of which is true of a drag.
+ *
+ * Unlike the drag this one may change the times as well as the day, which is
+ * why it takes both and computes the duration from them rather than preserving
+ * the old one. It redirects like every other form action in this file, because
+ * here the teacher submitted a form and is looking at the page it is on.
+ */
+export async function updateSessionSchedule(
+  classId: string,
+  sessionId: string,
+  formData: FormData,
+) {
+  const { supabase, session, timezone, sessionPath } = await authoriseSession(
+    classId,
+    sessionId,
+  );
+
+  const date = readCalendarDate(readText(formData, "date"));
+
+  if (!date) {
+    failTo(sessionPath, "Vui lòng chọn ngày cho buổi học này.");
+  }
+
+  const startTime = readText(formData, "start_time");
+  const endTime = readText(formData, "end_time");
+
+  if (!ISO_TIME.test(startTime) || !ISO_TIME.test(endTime)) {
+    failTo(sessionPath, "Vui lòng nhập giờ bắt đầu và giờ kết thúc.");
+  }
+
+  // Both times are read on the one day the teacher chose, exactly as
+  // `createSession` reads them: a lesson running past midnight would need a
+  // second date to express and this form does not ask for one.
+  const duration =
+    instantOf(timezone, date, endTime).getTime() -
+    instantOf(timezone, date, startTime).getTime();
+
+  const result = await rescheduleSession(
+    supabase,
+    classId,
+    session,
+    timezone,
+    date,
+    startTime,
+    duration,
+  );
+
+  if ("error" in result) {
+    failTo(sessionPath, result.error);
+  }
+
+  revalidatePath("/teacher", "layout");
+  redirect(sessionPath);
+}
+
+/**
+ * Sets one piece of homework against one session.
+ *
+ * ## Why this is not a new schema
+ *
+ * `homework_assignments` has carried a nullable `session_id` and the composite
+ * `(session_id, class_id) references class_sessions (id, class_id)` since the
+ * foundation commit, `homework_assignments_teacher_all` already scopes it to
+ * `app.my_class_ids()`, and `20260828001400_grants.sql` already grants the
+ * teacher every verb on it. `lib/student.ts` has been reading the pair since
+ * M26. The only thing missing was the teacher's half, so that is all that was
+ * added — no table, no column, no policy, no RPC.
+ *
+ * ## The submission rows are not optional
+ *
+ * `public.submit_homework(uuid)` — the one verb a student gets, and the only
+ * way a submission can ever be recorded — looks the row up with `select ...
+ * for update` and raises `42501` when it finds none. An assignment created
+ * without its submission rows would therefore be an assignment no student could
+ * ever hand in. Creating them is the schema's own definition of "assigned", not
+ * a convenience: `homework_status` defaults to `'assigned'` and the status
+ * invariant makes that the only state with no timestamps, which is exactly a
+ * piece of work that has been set and not yet done.
+ *
+ * They are inserted for the class's *active* members — `join_status = 'joined'`
+ * and `removed_at is null` — the same pair `loadSessionAttendance` and
+ * `app.my_student_class_ids()` use. An unclaimed invitation is not somebody who
+ * can hand work in.
+ *
+ * ## assigned_on is the lesson's own day
+ *
+ * Not `current_date`, which is what the column defaults to and would be wrong
+ * for a teacher writing up Tuesday's lesson on Thursday. It is
+ * `zonedCalendarDate(timezone, session.startsAt)` — the day the lesson happened
+ * on, on the class's clock — which is also what makes
+ * `homework_assignments_due_after_assigned` mean what a teacher expects.
+ */
+export async function createHomework(
+  classId: string,
+  sessionId: string,
+  formData: FormData,
+) {
+  const { supabase, teacherId, session, timezone, sessionPath } =
+    await authoriseSession(classId, sessionId);
+
+  const failPath = `${sessionPath}?tab=homework`;
+
+  const title = readText(formData, "title");
+
+  // `homework_assignments_title_length` is 1–300 on the trimmed value. This is
+  // the same rule said in Vietnamese before the round trip.
+  if (title.length === 0) {
+    failTo(failPath, "Vui lòng nhập tên bài tập.");
+  }
+  if (title.length > 300) {
+    failTo(failPath, "Tên bài tập quá dài.");
+  }
+
+  const skill = readText(formData, "skill");
+
+  if (!isSkill(skill)) {
+    failTo(failPath, "Vui lòng chọn kỹ năng cho bài tập này.");
+  }
+
+  const description = readText(formData, "description");
+
+  if (description.length > NOTE_MAX_LENGTH) {
+    failTo(failPath, "Mô tả bài tập quá dài.");
+  }
+
+  // The day the lesson was taught, on the class's clock — never the server's.
+  const assignedOn = zonedCalendarDate(timezone, session.startsAt);
+
+  const rawDue = readText(formData, "due_date");
+  let dueDate: string | null = null;
+
+  if (rawDue !== "") {
+    dueDate = readCalendarDate(rawDue);
+    if (!dueDate) {
+      failTo(failPath, "Hạn nộp không hợp lệ.");
+    }
+    // Mirrors `homework_assignments_due_after_assigned`. Both are `YYYY-MM-DD`
+    // and compare as strings; no `Date` is constructed to decide it.
+    if (dueDate < assignedOn) {
+      failTo(failPath, "Hạn nộp phải sau ngày giao bài.");
+    }
+  }
+
+  const rawMax = readText(formData, "max_score");
+  // `numeric(4, 1)` and `max_score > 0`, so at most 999.9 and never zero.
+  const maxScore = rawMax === "" ? 10 : Number(rawMax);
+
+  if (!Number.isFinite(maxScore) || maxScore <= 0 || maxScore > 999.9) {
+    failTo(failPath, "Điểm tối đa không hợp lệ.");
+  }
+
+  const { data: created, error } = await supabase
+    .from("homework_assignments")
+    .insert({
+      // Neither id comes from the form: both were proved by `authoriseSession`.
+      class_id: classId,
+      session_id: sessionId,
+      title,
+      description: description === "" ? null : description,
+      skill,
+      assigned_on: assignedOn,
+      due_date: dueDate,
+      max_score: maxScore,
+      // Derived from the session cookie in `authoriseClass`, never submitted.
+      created_by: teacherId,
+    })
+    .select("id")
+    .maybeSingle();
+
+  if (error || !created) {
+    if (error) logDbError("homework_assignments.insert", error);
+    failTo(failPath, "Chúng tôi chưa lưu được bài tập này. Vui lòng thử lại.");
+  }
+
+  const { data: members, error: rosterError } = await supabase
+    .from("class_members")
+    .select("id")
+    .eq("class_id", classId)
+    .eq("join_status", "joined")
+    .is("removed_at", null);
+
+  if (rosterError) {
+    logDbError("class_members.select(homework)", rosterError);
+    // The assignment exists and the teacher can see it; what failed is the
+    // fan-out. Said plainly rather than pretended away, because a student who
+    // has no submission row cannot hand the work in.
+    failTo(
+      failPath,
+      "Đã lưu bài tập, nhưng chưa giao được cho học viên. Vui lòng xóa và tạo lại.",
+    );
+  }
+
+  if (members && members.length > 0) {
+    const { error: fanOutError } = await supabase
+      .from("homework_submissions")
+      .insert(
+        members.map((member) => ({
+          assignment_id: created.id,
+          class_member_id: member.id,
+          class_id: classId,
+        })),
+      );
+
+    if (fanOutError) {
+      logDbError("homework_submissions.insert", fanOutError);
+      failTo(
+        failPath,
+        "Đã lưu bài tập, nhưng chưa giao được cho học viên. Vui lòng xóa và tạo lại.",
+      );
+    }
+  }
+
+  revalidatePath("/teacher", "layout");
+  redirect(failPath);
+}
+
+/**
+ * Withdraws one assignment from one session.
+ *
+ * A real DELETE rather than the soft removal a membership gets, because nothing
+ * outside this assignment depends on it: `homework_submissions_assignment_fk`
+ * is `on delete cascade`, so the submissions go with it, and no other table
+ * references either. A membership is the opposite — six composite keys cascade
+ * from it — which is why that one is `removed_at` and this one is not.
+ *
+ * Scoped by session as well as class, so an assignment id from another lesson
+ * of the same class matches nothing here either. `.select("id")` is what makes
+ * "already gone" distinguishable from "deleted".
+ */
+export async function removeHomework(
+  classId: string,
+  sessionId: string,
+  assignmentId: string,
+) {
+  const { supabase, sessionPath } = await authoriseSession(classId, sessionId);
+  const failPath = `${sessionPath}?tab=homework`;
+
+  if (!isUuid(assignmentId)) {
+    failTo(failPath, "Bài tập này không còn tồn tại.");
+  }
+
+  const { data, error } = await supabase
+    .from("homework_assignments")
+    .delete()
+    .eq("id", assignmentId)
+    .eq("class_id", classId)
+    .eq("session_id", sessionId)
+    .select("id");
+
+  if (error) {
+    logDbError("homework_assignments.delete", error);
+    failTo(failPath, "Chúng tôi chưa xóa được bài tập này. Vui lòng thử lại.");
+  }
+
+  if (!data || data.length === 0) {
+    failTo(failPath, "Bài tập này đã được xóa.");
+  }
+
+  revalidatePath("/teacher", "layout");
+  redirect(failPath);
+}
+
+/**
+ * Attaches one curriculum file to one session.
+ *
+ * ## This is the one part of M30 with no existing mechanism to reuse
+ *
+ * The audit looked for a bucket, an upload helper, a metadata table and a
+ * download route, and found none — a read-only `select ... from
+ * storage.buckets` against the project returned an empty list. So
+ * `supabase/migrations/20260901000100_class_materials.sql` proposes the
+ * smallest secure design consistent with the rest of the schema, and it is
+ * **not applied**: until a human runs it every statement here fails and the tab
+ * says so. Nothing creates the bucket or the table on demand.
+ *
+ * ## Where the security actually lives
+ *
+ * Not in this function. The bucket is private, so an object URL is not a
+ * capability; the upload runs on the server as the signed-in teacher, so
+ * `class_materials_objects_teacher_insert` compares the path's first segment
+ * against `app.my_class_ids()` and refuses a class this teacher does not own
+ * whatever the application asks for; and `class_materials_teacher_all` refuses
+ * the metadata row on the same basis. There is no service-role key in this
+ * path, no client-side Supabase call, and no place a browser could put a class
+ * id that is not re-proved by `authoriseSession` first.
+ *
+ * ## The filename is never a path
+ *
+ * `materialStoragePath` builds `<class_id>/<uuid>`. A filename is untrusted
+ * text — it can hold separators, `..`, control characters, or simply collide —
+ * and none of that can matter if it never becomes a path component. The real
+ * name is a column, and the download route hands it back through the signed
+ * URL's `Content-Disposition`.
+ *
+ * ## Order of operations
+ *
+ * Object first, row second, and the object is removed again if the row fails.
+ * The other order would leave a row pointing at bytes that do not exist, which
+ * the teacher would see as a file that will not download. This order leaves at
+ * worst an object nothing references, which nobody sees at all.
+ */
+export async function uploadMaterial(
+  classId: string,
+  sessionId: string,
+  formData: FormData,
+) {
+  const { supabase, teacherId, sessionPath } = await authoriseSession(
+    classId,
+    sessionId,
+  );
+
+  const failPath = `${sessionPath}?tab=materials`;
+  const file = formData.get("file");
+
+  if (!(file instanceof File) || file.size === 0) {
+    failTo(failPath, "Vui lòng chọn một tệp giáo trình.");
+  }
+
+  if (file.size > MAX_MATERIAL_BYTES) {
+    failTo(failPath, "Tệp vượt quá 25 MB.");
+  }
+
+  const fileName = file.name.trim();
+
+  // `class_materials_file_name_length` is 1–300 on the trimmed value.
+  if (fileName.length === 0 || fileName.length > 300) {
+    failTo(failPath, "Tên tệp không hợp lệ.");
+  }
+
+  // Said here in Vietnamese before an upload is spent on it; the bucket's own
+  // `allowed_mime_types` is the check that actually holds.
+  if (!isAllowedMaterial(file.type, fileName)) {
+    failTo(
+      failPath,
+      "Chỉ hỗ trợ tệp PDF, Word, Excel và PowerPoint.",
+    );
+  }
+
+  const storagePath = materialStoragePath(classId);
+
+  const { error: uploadError } = await supabase.storage
+    .from(MATERIALS_BUCKET)
+    .upload(storagePath, file, {
+      contentType: file.type,
+      // A fresh uuid cannot collide, and refusing an overwrite is what keeps a
+      // row and the bytes it names from ever being swapped underneath it.
+      upsert: false,
+    });
+
+  if (uploadError) {
+    console.error("[teacher] class-materials upload failed", {
+      message: uploadError.message,
+    });
+    failTo(failPath, "Chúng tôi chưa tải lên được tệp này. Vui lòng thử lại.");
+  }
+
+  const { error } = await supabase.from("class_materials").insert({
+    class_id: classId,
+    session_id: sessionId,
+    storage_path: storagePath,
+    file_name: fileName,
+    mime_type: file.type,
+    byte_size: file.size,
+    uploaded_by: teacherId,
+  });
+
+  if (error) {
+    logDbError("class_materials.insert", error);
+    // Compensate, so the bucket does not accumulate bytes nothing points at.
+    await supabase.storage.from(MATERIALS_BUCKET).remove([storagePath]);
+    failTo(failPath, "Chúng tôi chưa lưu được tệp này. Vui lòng thử lại.");
+  }
+
+  revalidatePath("/teacher", "layout");
+  redirect(failPath);
+}
+
+/**
+ * Removes one material — the row and the bytes.
+ *
+ * The row is read first, scoped to the class and the session, so the path that
+ * gets deleted comes from the database rather than from the request. A path
+ * submitted by a browser would make the object store's policies the only check
+ * standing between a teacher and another teacher's file; making the row the
+ * lookup means there are two, and the first one is this application's.
+ *
+ * The object goes first and the row second. If the object delete fails the row
+ * stays, so the teacher still sees the file and can try again; the other order
+ * would hide a file that still exists.
+ */
+export async function removeMaterial(
+  classId: string,
+  sessionId: string,
+  materialId: string,
+) {
+  const { supabase, sessionPath } = await authoriseSession(classId, sessionId);
+  const failPath = `${sessionPath}?tab=materials`;
+
+  if (!isUuid(materialId)) {
+    failTo(failPath, "Tệp này không còn tồn tại.");
+  }
+
+  const material = await loadMaterial(supabase, classId, materialId);
+
+  if (!material) {
+    failTo(failPath, "Tệp này đã được xóa.");
+  }
+
+  const { error: removeError } = await supabase.storage
+    .from(MATERIALS_BUCKET)
+    .remove([material.storagePath]);
+
+  if (removeError) {
+    console.error("[teacher] class-materials remove failed", {
+      message: removeError.message,
+    });
+    failTo(failPath, "Chúng tôi chưa xóa được tệp này. Vui lòng thử lại.");
+  }
+
+  const { error } = await supabase
+    .from("class_materials")
+    .delete()
+    .eq("id", materialId)
+    .eq("class_id", classId)
+    .eq("session_id", sessionId);
+
+  if (error) {
+    logDbError("class_materials.delete", error);
+    failTo(failPath, "Chúng tôi chưa xóa được tệp này. Vui lòng thử lại.");
+  }
+
+  revalidatePath("/teacher", "layout");
+  redirect(failPath);
 }

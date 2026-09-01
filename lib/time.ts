@@ -181,3 +181,20 @@ export function formatZonedTime(zone: string, instant: string): string {
     hour12: false,
   }).format(new Date(instant));
 }
+
+/**
+ * A `HH:mm` wall clock as minutes past midnight.
+ *
+ * Lives here rather than beside the calendar geometry it serves because it is
+ * the same wall clock `formatZonedTime` produces, and because `lib/calendar.ts`
+ * is `server-only` while the calendar's current-time indicator has to do this
+ * arithmetic in the browser. One definition, two callers, no copy.
+ *
+ * `% 24` because `Intl` renders midnight as "24:00" under an h24 locale and as
+ * "00:00" under h23, and which one a runtime picks for `vi-VN` is not something
+ * to bet a lesson's position on.
+ */
+export function minutesOfDay(time: string): number {
+  const [hour, minute] = time.split(":").map(Number);
+  return (hour % 24) * 60 + minute;
+}

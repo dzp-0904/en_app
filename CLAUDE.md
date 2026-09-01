@@ -5,8 +5,9 @@ Read it in full before starting any milestone. Do not ask the user for anything
 that is already answered here, in the repository, in git history, or in the
 current milestone prompt.
 
-Last updated: 2026-09-01, after M29 (M29 is UNCOMMITTED — in the working tree;
-M27 was committed by the user as `0269c0a`, M28 as `631a415`).
+Last updated: 2026-09-01, after M30. **M30 is UNCOMMITTED — it lives entirely
+in the working tree, by instruction.** M27 = `0269c0a`, M28 = `631a415`,
+M29 = `0431966`, all committed by the user.
 
 ---
 
@@ -88,12 +89,22 @@ SMTP secrets into the Docker image.
   session loaders.
 - `lib/attendance.ts`, `lib/lesson-log.ts`, `lib/score.ts`, `lib/course-type.ts`,
   `lib/standing.ts` — domain enums **and their Vietnamese display-label maps**.
-- `lib/time.ts` — timezone-aware formatters. See §9.
+- `lib/time.ts` — timezone-aware formatters. See §9. M30 moved `minutesOfDay`
+  here from `lib/calendar.ts`, which is `server-only`, so the client-side
+  current-time line can use it; `lib/calendar.ts` re-exports it unchanged.
 - `lib/auth-messages.ts` — added in M20; maps Supabase/GoTrue English provider
   errors to Vietnamese. Server-only, presentation-only.
 - `lib/mail/{mailer,invitation-email}.ts` — server-side SMTP only.
 - `lib/monthly-report.ts` — added in M27. `loadMonthlyStudentReport` (the one
   canonical report loader, decision **AA**) and `loadMonthlyClassSummary`.
+- `lib/homework.ts` — added in M30, server-only. `loadSessionHomework` over the
+  `homework_assignments` rows that already carry `session_id`. Note that the
+  comment at `app/teacher/[classId]/page.tsx:613` claiming EduTrack has no
+  homework table is **stale and wrong**.
+- `lib/materials.ts` — added in M30. The `class-materials` bucket name, the
+  25 MB cap, the seven allowed MIME types, `materialStoragePath` (always
+  `<class_id>/<uuid>`) and `signedMaterialUrl` (60 seconds). See decision **AM**;
+  the migration behind it is **not applied**.
 - `lib/report-period.ts` — `MonthKey`, `parseMonth`, `currentMonth`,
   `monthLabel`, `monthRange`, `shiftMonth`, all on the class's timezone.
 - `lib/report-text.ts` — the report's shared presentation vocabulary, so the
@@ -122,7 +133,18 @@ components/auth/submit-button.tsx
 components/onboarding/copy-field.tsx
 components/attendance/status-buttons.tsx
 components/ui/pending-tint.tsx
+components/calendar/now-line.tsx        (M30)
+components/calendar/session-drag.tsx    (M30)
 ```
+
+M30 added the seventh and eighth, and each has one concrete reason a server
+render cannot meet: `now-line.tsx` must re-read the clock every 30 seconds so
+the indicator does not go stale (§4 of the M30 brief asked for exactly that),
+and `session-drag.tsx` listens for a pointer gesture. Both render **nothing**
+without JavaScript, and neither fetches protected data. The count is
+**eight**; M30's other four new/rewritten UI files —
+`components/calendar/week-grid.tsx`, the session workspace page,
+`lib/homework.ts` and `lib/materials.ts` — are all server-side.
 
 M25 added `components/calendar/week-grid.tsx` and it is a **Server**
 Component too: the week comes from the URL and `now` is read once per request,
@@ -436,7 +458,7 @@ If a change appears to require a migration, an RLS change, an RPC change, a new
 dependency, service-role access, or client-side protected data — **stop and
 explain the architectural impact before proceeding.**
 
-### Migrations (`supabase/migrations/`, 15 files, all dated 20260828)
+### Migrations (`supabase/migrations/`, 16 files — 15 applied, 1 not)
 
 ```
 000100_extensions_and_schemas   000200_enums_and_domains
@@ -448,6 +470,12 @@ explain the architectural impact before proceeding.**
 001200_views                    001300_rpcs
 001400_grants                   001500_seed_mistake_tags
 ```
+
+Plus **`20260901000100_class_materials.sql`**, written under M30 and
+**never executed against any database** — the user's instruction was "write
+migration, do NOT apply it". Its own header says so. Until a human runs it,
+`public.class_materials` does not exist and the Giáo trình tab renders the
+ordinary failed-read alert. See decision **AM**.
 
 **Do not execute migrations against the hosted Supabase project.** Do not modify
 existing migrations or RLS policies.
@@ -1646,27 +1674,211 @@ known gaps.
     and the existing design system.
 - **NO COMMIT WAS CREATED.**
 
-## 14. Current project state (verified 2026-09-01, after M29)
+### M30 — the calendar as a workbench, and the session workspace (**uncommitted**)
+- **Audited first, end-to-end, before any edit**, as §1 required, and three of
+  the brief's premises turned out to be answered by the schema rather than by
+  new tables (decision **B** again):
+  - **A calendar block is one `class_sessions` row and nothing else.** §5 asks
+    that a drag "must not silently change a recurring schedule unless the model
+    defines it that way", so the model was read first: **there is no recurring
+    entity in this schema.** `classes.schedule_note` is free text the
+    migration's own comment labels display-only. A drag therefore moves exactly
+    one lesson, and the schedule sentence on the class is untouched.
+  - **Homework already had everything §10 asked for.** `homework_assignments`
+    carries `session_id` with a composite FK to `(id, class_id)`, teacher-scoped
+    RLS and full grants. No new homework schema was invented. (A stale comment
+    at `app/teacher/[classId]/page.tsx:613` claims "EduTrack has no homework:
+    there is no table" — it is **wrong**, and `lib/homework.ts`'s JSDoc says so.)
+  - **`class_sessions` already had `grant update` + `class_sessions_teacher_all`**,
+    so moving a session needed no policy, no grant and no RPC.
+- **Storage was the one genuine gap** (§11). A grep across all fifteen
+  migrations plus `app/`, `lib/` and `components/` found no bucket, no upload
+  helper, no metadata table and no download route, and a read-only
+  `select … from storage.buckets` returned `[]`. Reported and **asked** rather
+  than inferred; the answer was **"write the migration, do NOT apply it"**, so
+  `supabase/migrations/20260901000100_class_materials.sql` exists in the tree,
+  is **not executed anywhere**, and its own header says so. Until a human runs
+  it the Giáo trình tab renders the ordinary failed-read alert — which is what
+  it was observed doing.
+- **Implemented — 7 files changed, 6 new, 0 new dependencies, 1 new route:**
+  - **`components/calendar/now-line.tsx`** (new, client component **#7**) — the
+    §4 indicator. One 1px `bg-destructive` rule with an 8px dot at the time-axis
+    edge, positioned from the **class's** clock through `zonedCalendarDate` +
+    `formatZonedTime` (§7; no UTC arithmetic anywhere), re-read on a 30-second
+    interval so it does not go stale, `pointer-events-none` so it cannot
+    intercept a click or a drag, `aria-hidden` on both visual spans with an
+    `sr-only` "Thời điểm hiện tại: HH:mm." beside them, and **it returns `null`
+    unless today is one of the seven columns on screen** — §4's "do not draw a
+    misleading line across another day". It is server-rendered from
+    `initialDate`/`initialMinutes`, so it is correct with JavaScript off too and
+    simply stops ticking.
+  - **`components/calendar/session-drag.tsx`** (new, client component **#8**) —
+    §5. Three delegated listeners on a container, because the blocks are
+    children passed in from a Server Component. **No optimistic move**: the drop
+    fills a real hidden `<form>` and submits it, and the block moves when the
+    server says it moved. In flight the grid is `aria-busy`; on failure the
+    reason prints above the calendar and the block is still where the database
+    thinks it is.
+  - **`components/calendar/week-grid.tsx`** — kept, not replaced. M25's geometry
+    is untouched (decision **W** stands); the blocks gained `draggable` and four
+    data attributes, each day column gained `data-day`, and the old static
+    indigo indicator was replaced by `<NowLine>`. **Still a Server Component**,
+    and every lesson is still a real `<a href>`.
+  - **`app/teacher/[classId]/sessions/[sessionId]/page.tsx`** — the §7 workspace,
+    built by **extending the route that already existed** rather than adding a
+    duplicate (§6). Header, breadcrumb, date, `HH:mm – HH:mm`, a
+    `Quay lại Lịch dạy` button, then **six** tabs: the brief's four in its exact
+    order — **Danh sách học sinh · Điểm danh · Bài tập · Giáo trình** — followed
+    by **Ghi chú** and **Band điểm**, which are M13's existing lesson-note and
+    score features and were **not deleted to match a spec that did not mention
+    them** (the same reasoning as decision **Y**). Loads are tab-gated inside one
+    `Promise.all`.
+  - **`app/teacher/[classId]/actions.ts`** — `rescheduleSession` (the shared
+    core), `moveSessionToDate` (the drag), `updateSessionSchedule` (§14's
+    required accessible alternative), `createHomework`, `removeHomework`,
+    `uploadMaterial`, `removeMaterial`. Every one re-establishes teacher → owned
+    class → session-in-that-class server-side and puts **both** `id` and
+    `class_id` in the WHERE clause.
+  - **`app/teacher/[classId]/materials/[materialId]/route.ts`** (new, the only
+    new route) — a Route Handler so the download is a plain `<a href>` that works
+    without JavaScript (decision **AB**). It resolves the row **first** and takes
+    the storage path **from the row**, never from the request, then redirects to
+    a 60-second signed URL. The bucket is private; there is no service-role key
+    anywhere.
+  - **`lib/homework.ts`**, **`lib/materials.ts`**, and `minutesOfDay` moved from
+    `lib/calendar.ts` (which is `server-only`) into `lib/time.ts` so the client
+    `NowLine` can use it; `lib/calendar.ts` re-exports it so nothing else moved.
+- **Verified against the production standalone build on `localhost:3000`:**
+  - **The current-time line, measured live:** `top: 358.4px`, `left: 56` (the
+    time-axis edge), width 912, `pointer-events: none`, dot and rule both
+    `rgb(180, 35, 24)` = `--destructive` #b42318, rule 1px, both spans
+    `aria-hidden`, `sr-only` = "Thời điểm hiện tại: 11:36." An independently
+    computed `Intl` time in `Asia/Ho_Chi_Minh` was also **11:36**, and the
+    arithmetic checks: ((11×60+36) − 6×60)/60 × 64 = **358.4**. **After 75
+    seconds it moved to 359.467px and the label to 11:37** — it ticks.
+  - **It is absent where it should be:** weeks `2026-08-24` and `2026-09-07`
+    both measure `redCount: 0`.
+  - **The drag was exercised without a single production write**, per the
+    instruction "no production write at all". Two paths only: a drop back on the
+    block's **own** column (`submits: 0` — the no-op guard fires before the form
+    is touched) and a hover over a **different** column cancelled with `dragend`
+    (the wash appears on `2026-08-27`, then clears). `dragover` calls
+    `preventDefault()`, so a real drop is permitted. The row was re-read
+    afterwards and is unmoved: left 982, top 601, height 258.
+  - **The move arithmetic was exercised as pure logic against the shipped
+    `lib/time.ts`** — 25 assertions, **25 passed, 0 failed, no write issued**:
+    duration preserved to the millisecond on the real production row; time of
+    day preserved; month and **year** boundaries; a 00:30 lesson whose stored
+    instant is the *previous* UTC day, where a naive UTC slice would report
+    31 Dec 2026 for a lesson on **1 Jan 2027**; a DST fall-back in
+    `America/Los_Angeles` where the 90 minutes are kept and the wall-clock end
+    therefore reads 02:00; and the `endsAt <= startsAt` refusal on both `<` and
+    `=`.
+  - **Responsive: 16 paths × 6 widths (1280/1024/768/390/360/320) = 96
+    page-width combinations, 0 problems.** No page-level horizontal scroll
+    anywhere and no clipping. The calendar region fits at 768/1024/1280
+    (696/696, 712/712, 968/968) and scrolls **inside its own labelled region**
+    at 390/360/320 (324, 294, 254 client over 672 content). The six session tabs
+    need no scroller at any width.
+  - **Accessibility: 0 problems** on 8 calendar and session views. Exactly one
+    `h1`; zero duplicate ids, zero nameless controls, zero unlabelled inputs,
+    zero exposed avatars; one `aria-current` per labelled landmark
+    (`Điều hướng chính`, `Đường dẫn`, `Lưới lịch tuần`, `Các mục của buổi học`),
+    and the today column is `aria-current="date"` — a different token, so it
+    cannot collide. Focus rings measured by **real Tab traversal**
+    (`Input.dispatchKeyEvent`): **all 14 controls on the calendar and all 18 on
+    the session page are `solid 2px`.** The three schedule inputs and the file
+    input use the `Input` primitive's documented border-swap indicator instead —
+    measured settling to `rgb(68, 102, 238)` = `--primary` plus a 2px ring, the
+    same as every other field in the app.
+  - **No-JS** (`Emulation.setScriptExecutionDisabled`) on 11 paths: the session
+    block is a real `<a href>`, six tab links, seven nav links, breadcrumbs, the
+    `<details>` schedule editor, and every form. **`pendingTints` / `animate-pulse`
+    is 0 everywhere.** The attendance tab still emits **all four** values
+    `present / late / absent / excused` — **M12 intact**. The now-line still
+    renders on the current week (2 red nodes) and still does not on any other.
+  - **Security.** Anonymous: **307 → `/auth/login`** on the calendar, the session
+    workspace, the materials route, the class list, reports and `/student`. The
+    **student account** is bounced **307 → `/`** (which places it at `/student`)
+    from the calendar, the session workspace, the materials tab, the dashboard,
+    the class list and reports, and gets **404** from the materials download
+    route and from the reports export. Teacher, foreign or malformed ids —
+    foreign class, foreign session, both foreign, non-uuid class, non-uuid
+    session, foreign material, foreign class + foreign material, non-uuid
+    material — are **eight identical 404s**.
+  - **Regression:** M29's class list still renders its six `th scope="col"` and
+    its real row; the class-detail tabs still move `aria-current` through
+    Học viên / Buổi học / Thông tin lớp; `/teacher`, `/teacher/lesson-logs`,
+    `/teacher/tuition`, `/teacher/settings`, `/teacher/reports` all render one
+    `h1` and seven nav links; a teacher hitting `/student` is still sent to
+    `/teacher`. **M27 exports still produce real files** — per-student PDF
+    13,563 bytes (`%PDF`), DOCX 2,919 and XLSX 5,062 (both `PK`), class-wide
+    XLSX 3,349. `git diff` is **empty** for `components/attendance/`, the
+    fifteen `20260828` migrations, `proxy.ts`, `lib/supabase/`,
+    `app/auth/actions.ts`, `app/onboarding/actions.ts`, `app/join/`,
+    `app/teacher/settings/actions.ts`, `components/ui/`, `components/shell/`,
+    `lib/teacher.ts`, `lib/student.ts`, `lib/score.ts`, `lib/monthly-report.ts`
+    and `lib/export/`; `useFormStatus` is still at
+    `components/attendance/status-buttons.tsx:46`.
+  - **Console: 0 errors, 0 warnings** across 17 paths × 2 widths, re-checked
+    after the final rebuild.
+  - `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ · **27 routes**
+    (24 `page.tsx` + 3 `route.ts`), no debug or preview route — `find app` for
+    *preview* / *debug* / *m30* returns nothing.
+- **Limitations:**
+  - **The materials migration is not applied**, by instruction. Until it is,
+    `class_materials` does not exist, so upload, listing, download and removal
+    are **type-checked and code-reviewed, not exercised** — what was observed is
+    the honest failed-read alert, which is the correct behaviour for a table
+    that is not there. The three storage policies are likewise unexercised.
+  - **A real cross-day drop was never performed.** The only class in production
+    is `IELTS Evening Group B` and moving its one session is a production write.
+    The wiring was exercised on its two no-write paths and the arithmetic beneath
+    it on 25 assertions; the `23505` duplicate-start branch and the successful
+    `UPDATE … returning id` are code-reviewed only.
+  - **Moving a session does not move its `score_entries`.** They hang off
+    `recorded_on` (§6), not `session_id`, so a lesson moved to another day leaves
+    that day's marks where they were. This is documented in `rescheduleSession`'s
+    JSDoc. There is deliberately **no status guard** blocking the move of a
+    `completed` session, because the accessible edit form must be able to correct
+    any session and the two paths must not disagree.
+  - **Homework was seen only in its empty state** — this class has no
+    `homework_assignments` rows. The create form renders and validates; the four
+    status tones and the submission counts are code-reviewed.
+  - The brief said "reference screenshots are attached"; **no image was attached
+    to the message**, exactly as in M29. The layout follows the brief's prose and
+    the existing design system.
+- **NO COMMIT WAS CREATED.**
+
+## 14. Current project state (verified 2026-09-01, after M30)
 
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `631a415` — ":art: modify performance labels" (M28, committed by the user) |
-| M27 / M28 | both committed by the user — M27 as `0269c0a`, M28 as `631a415`.
-  Earlier revisions of this file described each as uncommitted; that is stale. |
-| `origin/main` | everything through M28 is pushed. |
+| HEAD | `0431966` — ":hammer: rebuild teacher class list as detailed table" (M29,
+  committed by the user). M27 = `0269c0a`, M28 = `631a415`. Earlier revisions of
+  this file called M27, M28 and M29 uncommitted; all three are stale. |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
-| Working tree | **NOT clean — M29 is uncommitted, by instruction.** One modified
-  source file (`app/teacher/classes/page.tsx`) plus this file. |
-| Routes | **26** (24 `page.tsx` + 2 `route.ts`: `app/auth/callback/route.ts` and
-  `app/teacher/reports/export/route.ts`) — M29 added none |
-| Migrations | 15, unchanged since the database foundation commit |
-| RLS | enabled + FORCEd on 13 tables |
-| Client components | still **six** |
-| Shared primitives | still **19** — M29 added none and changed none |
+| Working tree | **NOT clean — M30 is uncommitted, by instruction.** Seven
+  modified source files, five new source files, one new (unapplied) migration,
+  plus this file. |
+| Routes | **27** (24 `page.tsx` + 3 `route.ts`: `app/auth/callback/route.ts`,
+  `app/teacher/reports/export/route.ts` and, new in M30,
+  `app/teacher/[classId]/materials/[materialId]/route.ts`) |
+| Migrations | **16 files, 15 applied.** The sixteenth,
+  `20260901000100_class_materials.sql`, is in the tree and **has never been
+  executed against any database** — written under M30 at the user's explicit
+  instruction ("write migration, do NOT apply it"). |
+| RLS | enabled + FORCEd on 13 tables. The unapplied migration would add a
+  fourteenth (`public.class_materials`) plus three `storage.objects` policies. |
+| Client components | **eight** — M30 added `components/calendar/now-line.tsx`
+  (the ticking current-time line, which must re-read the clock) and
+  `components/calendar/session-drag.tsx` (drag and drop, which is a pointer
+  gesture). Both are enhancements that render nothing without JavaScript. |
+| Shared primitives | still **19** — M30 added none and changed none |
 | Dependencies | unchanged since M27 (`pdf-lib`, `@pdf-lib/fontkit`). Still no
-  i18n library, no charting library, no AI SDK; `lucide-react` is installed and
-  imported nowhere. |
+  i18n library, no charting library, no calendar library, no AI SDK;
+  `lucide-react` is installed and imported nowhere. |
 | Gates | `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ |
 
 **Measured hop costs against this hosted Supabase project** (from Node, outside
@@ -1699,7 +1911,9 @@ not from a single averaged "one round trip" figure.
 /teacher/[classId]                             app/teacher/[classId]/page.tsx        (tabs: ?tab=lessons|info)
 /teacher/[classId]/edit                        .../edit/page.tsx
 /teacher/[classId]/sessions/new                .../sessions/new/page.tsx
-/teacher/[classId]/sessions/[sessionId]        .../sessions/[sessionId]/page.tsx
+/teacher/[classId]/sessions/[sessionId]        .../sessions/[sessionId]/page.tsx     (the M30 session workspace; tabs:
+                                                                                      ?tab=attendance|homework|materials|notes|bands)
+/teacher/[classId]/materials/[materialId]      .../materials/[materialId]/route.ts   (signed-URL redirect, teacher-only)
 /student                                       app/student/page.tsx                  (class chooser)
 /student/[classId]                             app/student/[classId]/page.tsx        (the Figma student dashboard;
                                                                                       tabs: ?tab=homework|history|lessons, ?skill=)
@@ -1897,6 +2111,64 @@ Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
   1024px until its `PageShell` was given `min-w-0`. Any future page that puts a
   `min-width` inside `PageShell` needs the same, and the fix belongs on the page
   rather than in the primitive until more than one page needs it.
+
+- **AI.** **A calendar block is one `class_sessions` row, and dragging it moves
+  exactly that row.** There is no recurring-schedule entity anywhere in this
+  schema — `classes.schedule_note` is free text the migration's own comment
+  labels display-only, and `class_sessions` is authoritative. So a drag changes
+  one lesson and never a pattern, the schedule sentence on the class is not
+  rewritten behind the teacher's back, and no "does this repeat?" prompt is
+  needed. The move preserves the time of day and the duration **in
+  milliseconds**, which is deliberate: across a DST transition a 90-minute
+  lesson stays 90 minutes of teaching even though its wall-clock end reads an
+  hour differently. Do not "fix" that by preserving wall-clock end instead.
+- **AJ.** **The current-time line is `--destructive` (#b42318) and it must be
+  able to be absent.** Red is the one colour in this palette that is not already
+  carrying a meaning on the calendar — indigo is the primary class tone *and*
+  today's day disc, which is why M25's indigo indicator was wrong. The line is
+  `pointer-events-none` so it can never intercept a click or a drop, both visual
+  spans are `aria-hidden` with an `sr-only` "Thời điểm hiện tại: HH:mm." beside
+  them, and it renders **only when today is one of the seven columns on screen**
+  — a line drawn across last week is a lie about when now is. It is positioned
+  from the **class's** clock via `lib/time.ts` (§7), never from UTC, and it
+  re-reads on a 30-second interval so it does not go stale while the tab is
+  open. It is server-rendered from its initial props, so it is also correct with
+  JavaScript off and simply stops ticking.
+- **AK.** **Drag and drop is never the only way to move a session, and it is
+  never optimistic.** The same change is a plain `<form>` on the session's own
+  page — a date and two times inside a `<details>` — reached by the same link
+  the block already is, so it works with a keyboard, a screen reader and no
+  JavaScript, none of which is true of a pointer gesture. And the drop does not
+  reposition the block: it submits a real form, and the block moves when the
+  server says it moved. Both routes go through the **one** `rescheduleSession`
+  core, so the accessible path and the pointer path cannot disagree — which is
+  also why there is deliberately no status guard blocking the move of a
+  `completed` session. Note the consequence and do not paper over it:
+  `score_entries` hang off `recorded_on` (§6), not `session_id`, so moving a
+  lesson leaves that day's marks on the old date.
+- **AL.** **The session workspace extends `/teacher/[classId]/sessions/[sessionId]`;
+  it is not a second route.** Clicking a lesson navigates to a real URL rather
+  than opening a client modal, so it is bookmarkable, works with Back and
+  Forward, works without JavaScript and is reachable by a keyboard. Its tabs are
+  the brief's four in the brief's order — **Danh sách học sinh · Điểm danh ·
+  Bài tập · Giáo trình** — followed by **Ghi chú** and **Band điểm**, which are
+  M13's existing features and were not deleted to match a spec that did not
+  mention them (the reasoning of decision **Y**). Attendance inside it is the
+  **untouched** M12 stack: `components/attendance/status-buttons.tsx` and
+  `recordAttendance` are not modified, wrapped or re-implemented.
+- **AM.** **Class materials are a private bucket plus a metadata row, and the
+  download is a Route Handler that signs a URL — never a public object.**
+  `supabase/migrations/20260901000100_class_materials.sql` is written and
+  deliberately **not applied** (the user's instruction was "write migration, do
+  NOT apply it"), so until a human runs it the Giáo trình tab shows the ordinary
+  failed-read alert, which is the honest thing for a table that is not there.
+  When it is applied: the bucket is `public = false`, every object key is
+  `<class_id>/<uuid>` and a CHECK constraint plus three `storage.objects`
+  policies gated on `app.my_class_ids()` are what stop a guessed URL, the table
+  grants `select, insert, delete` and **no UPDATE**, and
+  `app/teacher/[classId]/materials/[materialId]/route.ts` resolves the row first
+  and takes the storage path **from the row**, never from the request. There is
+  no service-role key in the application and none is to be added (§8, §9).
 
 Additional standing constraints from the user, still in force:
 

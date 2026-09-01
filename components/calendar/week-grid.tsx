@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { NowLine } from "@/components/calendar/now-line";
 import { PendingTint } from "@/components/ui/pending-tint";
 import {
   SLOT_HEIGHT,
@@ -20,9 +21,21 @@ import { cn } from "@/lib/utils";
  * `grid-cols-[56px_repeat(7,1fr)]` frame, one 64px band per hour, a solid rule
  * on the hour and a dashed one on the half hour, the day number in a 28px disc
  * that fills indigo on today, the today column washed in `--secondary`, and a
- * thin indigo line with a dot on its left end marking now. A lesson is an
- * absolutely positioned block inside its own day column, offset by its start
- * time and as tall as it lasts.
+ * thin line with a dot on its left end marking now. A lesson is an absolutely
+ * positioned block inside its own day column, offset by its start time and as
+ * tall as it lasts.
+ *
+ * WHAT M30 CHANGED HERE, AND WHAT IT DID NOT. The current-time indicator is now
+ * red rather than indigo and lives in `components/calendar/now-line.tsx`, which
+ * is a client component so that it can keep up with the clock instead of
+ * freezing at the moment the page was rendered. Red is `--destructive`, this
+ * palette's only red, so nothing was added to the design tokens; indigo was the
+ * wrong choice for it anyway, being the same colour as the *primary* class tone
+ * and as today's date disc. Each block also gained `draggable` and four data
+ * attributes, and each day column gained its date — `components/calendar/
+ * session-drag.tsx` reads them by delegation. This file is still a Server
+ * Component and every lesson is still a real `<a href>`; nothing about the
+ * grid depends on JavaScript.
  *
  * WHY THE BLOCK IS A CHILD OF ITS COLUMN. The Figma positions all 7×n blocks
  * against the grid itself with `left: calc(56px + col * ((100% - 56px) / 7))`.
@@ -94,6 +107,7 @@ export function WeekGrid({
   sessions,
   tones,
   meta,
+  zone,
   today,
   nowMinutes,
   startHour,
@@ -104,6 +118,8 @@ export function WeekGrid({
   sessions: CalendarSession[];
   tones: Map<string, ClassTone>;
   meta: Map<string, ClassMeta>;
+  /** `classes.timezone` — the clock the current-time line keeps ticking on. */
+  zone: string;
   /** Today on the calendar's own clock, which may not be in `days` at all. */
   today: string;
   /** Minutes past midnight, on that same clock. */
@@ -123,12 +139,6 @@ export function WeekGrid({
     if (bucket) bucket.push(session);
     else byDay.set(session.date, [session]);
   }
-
-  const nowVisible =
-    days.includes(today) &&
-    nowMinutes >= startHour * 60 &&
-    nowMinutes < endHour * 60;
-  const nowTop = ((nowMinutes - startHour * 60) / 60) * SLOT_HEIGHT;
 
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-card">
@@ -218,8 +228,12 @@ export function WeekGrid({
               return (
                 <div
                   key={day}
+                  // Read by `SessionDrag` to know which day a block was
+                  // dropped on. Inert markup on its own: without JavaScript
+                  // nothing looks at it.
+                  data-day={day}
                   className={cn(
-                    "relative border-r border-border last:border-r-0",
+                    "relative border-r border-border last:border-r-0 rounded-sm",
                     isToday && "bg-secondary/30",
                   )}
                 >
@@ -242,6 +256,16 @@ export function WeekGrid({
                       <Link
                         key={lesson.sessionId}
                         href={`/teacher/${lesson.classId}/sessions/${lesson.sessionId}`}
+                        // The block is a link first and a drag handle second.
+                        // Click, Enter, middle-click and "open in new tab" all
+                        // still do what they do on any other link; `draggable`
+                        // only tells the browser a gesture may start here, and
+                        // `SessionDrag` is what gives that gesture a meaning.
+                        draggable
+                        data-session-block=""
+                        data-session-id={lesson.sessionId}
+                        data-class-id={lesson.classId}
+                        data-from-date={lesson.date}
                         // The 2px inset on each side is the Figma's: it is what
                         // keeps two consecutive lessons from sharing an edge.
                         style={{ top: top + 2, height: box - 4 }}
@@ -316,16 +340,15 @@ export function WeekGrid({
               ))}
             </div>
 
-            {nowVisible ? (
-              <div
-                aria-hidden
-                className="pointer-events-none absolute right-0 left-14 z-20 flex items-center"
-                style={{ top: nowTop }}
-              >
-                <span className="-ml-1 size-2 shrink-0 rounded-full bg-primary" />
-                <span className="h-px flex-1 bg-primary" />
-              </div>
-            ) : null}
+            <NowLine
+              zone={zone}
+              days={days}
+              startHour={startHour}
+              endHour={endHour}
+              slotHeight={SLOT_HEIGHT}
+              initialDate={today}
+              initialMinutes={nowMinutes}
+            />
           </div>
         </div>
       </div>

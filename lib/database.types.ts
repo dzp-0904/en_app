@@ -78,6 +78,64 @@ export type Database = {
           },
         ]
       }
+      class_materials: {
+        Row: {
+          byte_size: number
+          class_id: string
+          created_at: string
+          file_name: string
+          id: string
+          mime_type: string
+          session_id: string | null
+          storage_path: string
+          uploaded_by: string
+        }
+        Insert: {
+          byte_size: number
+          class_id: string
+          created_at?: string
+          file_name: string
+          id?: string
+          mime_type: string
+          session_id?: string | null
+          storage_path: string
+          uploaded_by: string
+        }
+        Update: {
+          byte_size?: number
+          class_id?: string
+          created_at?: string
+          file_name?: string
+          id?: string
+          mime_type?: string
+          session_id?: string | null
+          storage_path?: string
+          uploaded_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_materials_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "classes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_materials_session_fk"
+            columns: ["session_id", "class_id"]
+            isOneToOne: false
+            referencedRelation: "class_sessions"
+            referencedColumns: ["id", "class_id"]
+          },
+          {
+            foreignKeyName: "class_materials_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       class_members: {
         Row: {
           class_id: string
