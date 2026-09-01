@@ -2251,43 +2251,234 @@ known gaps.
   - The Figma's To-do is `useState` over hardcoded strings: the design shows the
     *shape* of the feature and has no persistence to be faithful to. Every
     behavioural difference from it is listed under Part 2 and argued in JSDoc.
+- **NO COMMIT WAS CREATED.** *(Superseded: M32 was committed by the user as
+  `e0f6883`, and `9f547db` ":hammer: update time font and language" followed
+  it. HEAD is `9f547db`.)*
+
+### M33 — attendance is locked until the lesson starts (**uncommitted**)
+
+- **Audited before editing, as the brief required, and no migration was needed.**
+  `class_sessions.starts_at` is a `timestamptz` and is the only thing that
+  records when a lesson begins, so the brief's "STOP and ask me" branch never
+  came up. **Zero migrations, zero RLS/RPC/grant/schema changes, zero new
+  dependencies, and no modal.** `schedule_note`, the calendar slot and the
+  browser's wall clock are all untouched, exactly as the brief forbade.
+- **The rule is instant-vs-instant, so it consults no timezone at all**
+  (decision **AR**). `starts_at` is an instant and `Date.now()` is an instant;
+  19:30 in Ho Chi Minh City and the same moment read in UTC are the same point
+  on the timeline. The class's zone is needed only to *print* when the lesson
+  starts, which happens at the call sites through `formatZonedTime` /
+  `formatCalendarDate`. There is no `toISOString().slice(0, 10)` anywhere in
+  M33.
+
+**One rule, in one place**
+
+- **`lib/attendance.ts` gained `isAttendanceOpen(startsAt, now = Date.now())`**
+  and that is the only copy. The page decides what to draw with it, the Server
+  Action decides whether to write with it, and the client countdown decides what
+  to say with it — three call sites, one definition, so they cannot disagree.
+  `lib/attendance.ts` was already pure and not `server-only`, which is what lets
+  a client component import it. The comparison is `>=`, so the lesson's own
+  start minute is open. An unparseable instant fails **closed** and logs
+  server-side.
+
+**The enforcement is the Server Action, and nothing else is**
+
+- **`recordAttendance` gained the guard**, immediately after `authoriseSession`
+  returns the session row and **before** the uuid check, the status check, the
+  `class_members` lookup and the `session_attendance` upsert. It reads the
+  authoritative `starts_at` off that row rather than anything the request
+  carried — there is no time, no date and no "unlocked" flag on the form. The
+  chain is now `authenticated → teacher → owned class → session in that class →
+  a session that has started → active member → attendance`. It sits after the
+  whole ownership chain, so a caller who does not own the session still learns
+  nothing from it. Refusal is the existing `failTo(sessionPath, …)` — the
+  ordinary Vietnamese `?error=` redirect, not a raw Postgres error.
+
+**The page is a courtesy, and it says so**
+
+- **`readTab` gained a third fallback**: `?tab=attendance` before the lesson
+  falls back to `students`, the same fallback `?tab=bands` has always taken on a
+  class with no band scale. That is what makes the direct URL safe *by
+  construction* — the page cannot render an attendance form it has decided not
+  to open.
+- **`components/ui/tabs.tsx` gained `disabled` + `disabledHint`** on `TabItem`.
+  A disabled tab renders as a `<span>` with `aria-disabled="true"` and an
+  `sr-only` " — chưa mở", **not** a `<Link>` with its click swallowed: there is
+  no destination to announce and nothing for a keyboard to visit. Still 19
+  primitives — this is a variant, not a file.
+- **`components/attendance/attendance-lock.tsx` is client component #9**, and
+  the brief sanctioned it: "a simple client-side time refresh/countdown only for
+  the UX state, while keeping the server-side check authoritative". Seeded from
+  the server's own `initialNow` like `now-line.tsx`, so the first client render
+  is byte-identical to the server's, there is no hydration mismatch, and with
+  JavaScript off it renders a correct sentence that simply stops counting. At
+  the boundary it calls `router.refresh()` **once** — a *server* re-render. The
+  client unlocks nothing; it asks the server to look again.
+
+**Verified against the production standalone build, on two servers**
+
+- **The timing could not be tested without moving a clock, and the one
+  production session is real data.** So a *second* standalone server ran on port
+  3100 under a `Date`-shifting `--require` preload, with a matching page-clock
+  shim installed over CDP. The real page, the real action, the real row and the
+  real RLS all execute; only the machine clock moves. **No production write was
+  intended** — see the limitation below for the one that happened anyway, which
+  is reported honestly.
+- **Pure logic: 35/35 and 28/28 assertions passed** against the shipped
+  `isAttendanceOpen` and the shipped `remainingText`, imported by
+  `file:///D:/tech_ed/...` URL through Node's type stripping, not retyped.
+- **All eight of the brief's cases:**
+  1. **Before** (04:00Z, one hour early): tab is a `<span>`,
+     `aria-disabled="true"`, `opacity 0.6`, sr-only " — chưa mở"; **zero**
+     `button[name=status]`; notice "Điểm danh sẽ mở khi buổi học bắt đầu lúc
+     12:00. Còn 1 giờ."
+  2. **Exactly at**, live on one un-reloaded page: locked with "Còn 1 phút." at
+     04:59:02/22/42/57, then a **link** with no notice at 05:00:07/17/27 — the
+     client timer fired on the boundary and `router.refresh()` had the server
+     re-render it open.
+  3. / 7. **After**, real clock: all six tabs are links, no notice, and
+     `?tab=attendance` renders **`present / late / absent / excused`** — M12
+     intact and unchanged.
+  4. **Direct `?tab=attendance` before start:** URL retained, the students panel
+     renders as `aria-current="page"`, **zero** attendance buttons, notice shown.
+  5. **Forged submit before start.** A `fetch` POST proved inconclusive (both
+     servers 200 after redirect, identical bodies), so the forgery was rebuilt as
+     a **native `<form>` in the page DOM and `f.submit()`**, with `status=bogus`
+     as a write-impossible control: on the *open* server that returns
+     "Vui lòng chọn một trong các trạng thái điểm danh.", proving the forgery
+     genuinely reaches `recordAttendance`. On the *locked* server both
+     `status=bogus` **and** `status=late` (a valid value that would have changed
+     real data) return **"Điểm danh sẽ mở khi buổi học bắt đầu lúc 12:00."** —
+     the lock error, which also proves the guard precedes the status check. The
+     stored value was re-read afterwards and is unchanged.
+  6. **Availability follows a moved `starts_at`:** with the clock at
+     2026-08-27T04:00Z — after the session's *previous* start, before its
+     current one — the page is locked and says "…lúc 12:00 ngày 29/08/2026.
+     Còn 2 ngày 1 giờ.", exercising the not-today date branch too.
+  8. **Authorization unchanged.** Anonymous: **307 → `/auth/login`** on five
+     paths on both servers. The **student account** (second Chrome profile on
+     9223, so the teacher session stayed intact) is redirected to `/student`
+     from the session workspace, `?tab=attendance`, the calendar, `/teacher` and
+     `/teacher/classes` — **identically on both servers**, so the lock leaks
+     nothing to a non-teacher. As the teacher, a foreign uuid and a non-uuid each
+     give the identical styled Vietnamese 404 ("Không tìm thấy buổi học đó") with
+     and without `?tab=attendance`, on both servers.
+- **Responsive:** 4 session-workspace paths × 6 widths (1280/1024/768/390/360/320)
+  on **both** servers — **0 problems**, measured as `window.scrollTo(9999,0)` then
+  `window.scrollX` *and* by whether the `h1` actually moved. Nothing clipped.
+- **Accessibility: 0 problems** on the locked and open workspace. Exactly one
+  `h1`; zero duplicate ids, zero nameless controls, zero unlabelled inputs, zero
+  exposed avatars; one `aria-current` per labelled landmark (`Điều hướng chính`,
+  `Đường dẫn`, `Các mục của buổi học`). The M31/M32 "nameless control" artefact
+  reappeared and was **confirmed to be the instrument again**: `innerText` is
+  empty by definition inside a collapsed `<details>`, and re-auditing with
+  `textContent` and the disclosures opened gives **0**.
+- **Focus rings by real Tab traversal** (`Input.dispatchKeyEvent`, 260 ms
+  settle): **17/17 stops `solid 2px` locked, 18/18 open.** The difference is
+  exactly one stop — the disabled Điểm danh tab is **absent from the tab order
+  entirely**, which is the point of rendering a `<span>` rather than a dimmed
+  link.
+- **No-JS** (`Emulation.setScriptExecutionDisabled`) on both servers: locked, the
+  notice **still renders** (server-seeded) with the tab still a non-link `<span>`
+  carrying `aria-disabled` and its sr-only hint; open, `?tab=attendance` still
+  emits all four values `present / late / absent / excused` — **M12 intact**.
+  `animate-pulse` / `pendingTints` is **0** everywhere.
+- **Console: 0 errors, 0 warnings** across 8 paths × 2 widths × 2 servers = 32
+  page loads — including no hydration error on the locked page, which is what
+  confirms the `initialNow` seeding.
+- **Regression:** `git diff --stat` is **empty** for `components/attendance/`,
+  `supabase/`, `proxy.ts`, `lib/supabase/`, `app/auth/actions.ts`,
+  `app/onboarding/actions.ts`, `app/join/`, `app/teacher/settings/actions.ts`,
+  `app/teacher/actions.ts`, `components/shell/`, `components/calendar/`,
+  `lib/score.ts`, `lib/monthly-report.ts`, `lib/export/`, `lib/student.ts`,
+  `lib/teacher.ts`, `lib/time.ts` and `lib/calendar.ts`; `useFormStatus` is still
+  at `components/attendance/status-buttons.tsx:46`. **M27 exports still produce
+  real files** — per-student PDF **14,808** bytes (`%PDF`), DOCX **3,210**,
+  student XLSX **5,264**, class-wide XLSX **3,352** (all `PK`).
+- `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ · **28 routes**
+  (25 `page.tsx` + 3 `route.ts`), unchanged, no preview or debug route.
+- Diff: **4 files changed, 195 insertions(+), 24 deletions(-)**, plus one new
+  file, `components/attendance/attendance-lock.tsx`.
+
+- **Limitations:**
+  - **One production upsert happened, and it was caused by a defective test
+    rig.** The first version of the clock preload replaced only
+    `globalThis.Date`, leaving the *original* `Date.now` that the Server Action
+    path reads — so the page rendered locked while the action still saw the real
+    clock, and a forged `status=present` submit reached the real
+    `recordAttendance`. The stored value was **already `present`**, and
+    `present` was chosen deliberately for exactly that reason (the M22
+    "identical existing values" mitigation), so **no attendance value changed —
+    only `updated_at`**. The preload was fixed by also assigning `R.now = now`,
+    after which the guard fired correctly. Reported rather than buried.
+  - **The clock was moved, not the data.** Every timing case is a real page, a
+    real action and a real row under a shifted machine clock. That exercises the
+    rule end-to-end but is not the same as waiting for 19:30 in wall time.
+  - **The forged submit used a synthesised native form**, which reaches the
+    Server Action through the real progressive-enhancement wire format, but is
+    not a hand-rolled HTTP client. A `Next-Action`-header POST was tried and
+    returned 500 (`a.get is not a function`) because it lacked the router-state
+    headers Next requires — an instrument limitation, not an application defect.
+  - **A pre-existing horizontal-scroll finding, outside M33's scope.** With
+    *classic* scrollbars (a desktop window narrowed to 390/360/320),
+    `/teacher/calendar` and `/teacher/[classId]` scroll the page sideways by
+    286-357px, while `/teacher/classes` — the one page carrying `min-w-0` on its
+    `PageShell` — does not. This is decision **AH** in a second form. With
+    *overlay* scrollbars (what a phone has, and evidently what M25/M30/M31
+    measured) all three are **0**, which is why earlier milestones recorded no
+    problem. It is **not M33's**: `/teacher/calendar` renders none of the five
+    changed files. The brief said not to change the Teacher Calendar, so it is
+    reported rather than fixed. The page M33 *did* change is clean under the
+    stricter instrument at every width.
+  - **The one production session had already moved.** It is
+    `2026-08-29 12:00–16:06 Asia/Ho_Chi_Minh`, not the `2026-08-26 12:01–16:07`
+    recorded in earlier revisions of this file.
 - **NO COMMIT WAS CREATED.**
 
-## 14. Current project state (verified 2026-09-01, after M32)
+## 14. Current project state (verified 2026-09-01, after M33)
 
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `a68d13e` — ":hammer: improve teacher calendar scheduling and session
-  workspace" (M31, committed by the user). M27 = `0269c0a`, M28 = `631a415`,
-  M29 = `0431966`, M30 = `9c498b2`. Earlier revisions of this file called M27
-  through M31 uncommitted; every one of those claims is stale. |
+| HEAD | `9f547db` — ":hammer: update time font and language", committed by the
+  user. M27 = `0269c0a`, M28 = `631a415`, M29 = `0431966`, M30 = `9c498b2`,
+  M31 = `a68d13e`, **M32 = `e0f6883`**. Earlier revisions of this file called
+  M27 through M32 uncommitted; every one of those claims is stale — the tree
+  was clean when M33 began. |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
-| Working tree | **NOT clean — M32 is uncommitted.** Three modified source files
-  (`app/teacher/page.tsx`, `components/ui/stat-card.tsx`,
-  `lib/database.types.ts`), four new files (`app/teacher/actions.ts`,
-  `lib/teacher-tasks.ts`, `components/dashboard/todo-panel.tsx` and the
-  unapplied `supabase/migrations/20260901000200_teacher_tasks.sql`), plus this
-  file. |
+| Working tree | **NOT clean — M33 is uncommitted.** Four modified source files
+  (`lib/attendance.ts`, `app/teacher/[classId]/actions.ts`,
+  `components/ui/tabs.tsx`,
+  `app/teacher/calendar/session/[sessionId]/page.tsx`), one new file
+  (`components/attendance/attendance-lock.tsx`), plus this file. Nothing else
+  is modified — M32's files are all in `e0f6883`. |
 | Routes | **28** (25 `page.tsx` + 3 `route.ts`: `app/auth/callback/route.ts`,
   `app/teacher/reports/export/route.ts` and
-  `app/teacher/[classId]/materials/[materialId]/route.ts`). M32 added none —
-  the To-do's three Server Actions live in `app/teacher/actions.ts`, which is
-  not a route. |
+  `app/teacher/[classId]/materials/[materialId]/route.ts`). **M33 added none** —
+  it changed one existing page, one existing action file, one primitive and one
+  shared helper, and added one client component. |
 | Migrations | **17 files, 15 applied and TWO not.**
   `20260901000100_class_materials.sql` (M30) and
   `20260901000200_teacher_tasks.sql` (M32) are both in the tree and **have never
   been executed against any database** — each written at the user's explicit
-  instruction ("write migration, do NOT apply it"). |
+  instruction ("write migration, do NOT apply it"). **M33 added none and needed
+  none**: `class_sessions.starts_at` already carried everything the lock rule
+  reads. |
 | RLS | enabled + FORCEd on 13 tables. The two unapplied migrations would add a
   fourteenth and a fifteenth (`public.class_materials`, `public.teacher_tasks`),
   plus three `storage.objects` policies. |
-| Client components | still **eight** — M32 added none. Its To-do panel is a
-  Server Component whose whole interaction surface is `<details>`, `peer
-  sr-only` radios and real `<form>`s posting to Server Actions. |
-| Shared primitives | still **19** — M32 added no file. `components/ui/stat-card.tsx`
-  gained a **fourth shape** (`layout="inline"`), which is a variant, not a
-  primitive. |
+| Client components | **nine** — M33 added
+  `components/attendance/attendance-lock.tsx`, the countdown beside the locked
+  Điểm danh tab. The brief sanctioned it ("a simple client-side time
+  refresh/countdown only for the UX state"), it is seeded from the server's own
+  `initialNow` so it renders correctly with JavaScript off, and it unlocks
+  nothing — at the boundary it calls `router.refresh()` and lets the *server*
+  decide. M32's To-do panel is still a Server Component. |
+| Shared primitives | still **19** — neither M32 nor M33 added a file.
+  `components/ui/stat-card.tsx` gained a fourth shape (`layout="inline"`, M32)
+  and `components/ui/tabs.tsx` gained `disabled` + `disabledHint` (M33); both
+  are variants, not primitives. |
 | Dependencies | unchanged since M27 (`pdf-lib`, `@pdf-lib/fontkit`). Still no
   i18n library, no charting library, no calendar library, no drag-and-drop
   library, no AI SDK; `lucide-react` is installed and imported nowhere. |
@@ -2318,7 +2509,10 @@ not from a single averaged "one round trip" figure.
 /teacher/calendar/session/[sessionId]          .../calendar/session/[sessionId]/page.tsx
                                                                                      (the session workspace — moved here in M31 so
                                                                                       the sidebar keeps Lịch dạy active; tabs:
-                                                                                      ?tab=attendance|homework|materials|notes|bands)
+                                                                                      ?tab=attendance|homework|materials|notes|bands.
+                                                                                      M33: before `starts_at`, ?tab=attendance falls
+                                                                                      back to the students panel and the tab is a
+                                                                                      disabled span — see decision AR)
 /teacher/lesson-logs                           app/teacher/lesson-logs/page.tsx      (?class= &skill=)
 /teacher/reports                               app/teacher/reports/page.tsx
 /teacher/reports/export                        app/teacher/reports/export/route.ts   (?class= &month= &student= &format=pdf|docx|xlsx)
@@ -2688,6 +2882,36 @@ Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
   hover-revealed `×` (unreachable by touch). `setTaskDone` submits the **state
   it wants**, never "toggle", so two rapid clicks converge.
 
+- **AR.** **The attendance register opens when the lesson opens, the server is
+  what decides, and the rule needs no timezone.** A mark made before a lesson is
+  a guess about a student who has not arrived, and in `session_attendance` it is
+  indistinguishable from an observation — so `recordAttendance` refuses to write
+  until `now >= class_sessions.starts_at`, and that single guard is the whole
+  enforcement. It sits after the entire ownership chain and **before** the uuid
+  check, the status check and the first write, so a caller who does not own the
+  session still learns nothing from it, and one who does simply cannot write
+  early. Everything on the page — the dimmed tab, the countdown, the
+  `?tab=attendance` fallback — is a *courtesy*: a Server Function is a POST
+  endpoint, and the absence of a form is not a check.
+  **The rule consults no timezone, and that is not an oversight.** `starts_at`
+  is a `timestamptz`, i.e. an *instant*, and `Date.now()` is an instant; the
+  same moment read in Ho Chi Minh City and in UTC is the same point on the
+  timeline. So `isAttendanceOpen(startsAt, now)` in `lib/attendance.ts` compares
+  two numbers and is safe to evaluate in a browser. The class's zone is needed
+  only to *say* when the lesson starts, which happens at the call sites through
+  `formatZonedTime` / `formatCalendarDate`. Do not "fix" this by threading a
+  zone into the comparison — that would introduce the very wall-clock bug §7
+  exists to prevent. The comparison is `>=` (19:29 shut, 19:30 open) and an
+  unparseable instant fails **closed**.
+  **There is exactly one copy of the rule**, imported by the page, the Server
+  Action and the countdown, because if those three were written separately they
+  could disagree and the one that matters is the server's. The disabled tab is a
+  `<span aria-disabled="true">` with an `sr-only` reason, **not** a `<Link>` with
+  its click swallowed: there is no destination to announce, so it is removed
+  from the tab order rather than left as a keyboard trap. And the countdown
+  never reveals the sheet itself — at the boundary it calls `router.refresh()`
+  and lets the server re-read `starts_at` and re-decide.
+
 Additional standing constraints from the user, still in force:
 
 - Do not commit, push, deploy, or modify production data unless explicitly asked.
@@ -2698,6 +2922,13 @@ Additional standing constraints from the user, still in force:
 - `IELTS Evening Group B` is real data — do not write test data into it.
 - Do not replace `useFormStatus().data` in
   `components/attendance/status-buttons.tsx`.
+- **A clock-shifting test rig must replace `Date.now` on the *original* `Date`
+  constructor, not only `globalThis.Date`.** Assigning `globalThis.Date = D`
+  alone leaves `Date.now` intact on the binding server-side code paths have
+  already closed over, so the page renders against the shifted clock while a
+  Server Action still reads the real one — which in M33 produced a false
+  negative *and* let one forged submit reach production. The preload must also
+  do `Real.now = shifted`.
 - Do not use `toISOString().slice(0, 10)`.
 - Do not hardcode the Figma example invite code.
 

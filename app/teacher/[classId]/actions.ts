@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 
 import { inviteStudentByEmail } from "@/app/onboarding/actions";
-import { isAttendanceStatus } from "@/lib/attendance";
+import { isAttendanceOpen, isAttendanceStatus } from "@/lib/attendance";
 import {
   isPerformance,
   isSkill,
@@ -728,7 +728,15 @@ async function authoriseSession(
  * The whole chain is re-established here, in order, on every call:
  *
  *   authenticated user → teacher → owned class → session in that class
- *     → active member of that class → attendance for that (session, member)
+ *     → a session that has started → active member of that class
+ *     → attendance for that (session, member)
+ *
+ * The fifth link is the newest and the only one that is about time rather than
+ * ownership: `isAttendanceOpen(session.startsAt)`. It is enforced here and not
+ * merely drawn on the page, because everything a page hides is still reachable
+ * by POSTing to this function directly — the sheet being absent from the tab is
+ * a convenience, this is the rule. See `lib/attendance.ts`, which is the one
+ * copy of it, so the screen and the write cannot disagree.
  *
  * Three of the four arguments are bound segments and none of them is trusted:
  * `authoriseSession` turns the first two into an ownership decision, and the
@@ -756,10 +764,27 @@ export async function recordAttendance(
   membershipId: string,
   formData: FormData,
 ) {
-  const { supabase, teacherId, sessionPath } = await authoriseSession(
-    classId,
-    sessionId,
-  );
+  const { supabase, teacherId, session, timezone, sessionPath } =
+    await authoriseSession(classId, sessionId);
+
+  // The register does not open before the lesson does, and this is where that
+  // is decided. `authoriseSession` has already returned the session row, so the
+  // check costs nothing extra and reads the authoritative `starts_at` rather
+  // than anything the request carried — there is no time, no date and no
+  // "unlocked" flag anywhere on this form. A Server Function is a POST
+  // endpoint: the page not drawing the sheet is a courtesy to the teacher, and
+  // only this line is the rule. It sits after the whole ownership chain and
+  // before the first write, so a caller who does not own the session still
+  // learns nothing from it, and a caller who does simply cannot write early.
+  if (!isAttendanceOpen(session.startsAt)) {
+    failTo(
+      sessionPath,
+      `Điểm danh sẽ mở khi buổi học bắt đầu lúc ${formatZonedTime(
+        timezone,
+        session.startsAt,
+      )}.`,
+    );
+  }
 
   if (!isUuid(membershipId)) {
     failTo(sessionPath, "Học viên này không còn trong danh sách lớp.");

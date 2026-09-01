@@ -59,6 +59,18 @@ export type TabItem = {
   label: string;
   href: string;
   current?: boolean;
+  /**
+   * Render the tab as inactive: visible, dimmed, and not a link. For a view
+   * that exists but is not available yet — the session workspace's Điểm danh,
+   * which opens when the lesson starts. Say why in `disabledHint`; a control
+   * that is off and silent about it is a bug report waiting to be filed.
+   */
+  disabled?: boolean;
+  /**
+   * Appended to the label for assistive technology only, e.g. "chưa mở".
+   * `aria-disabled` says the tab is off; this says what would turn it on.
+   */
+  disabledHint?: string;
 };
 
 const GROUP = {
@@ -101,21 +113,43 @@ function Tabs({
       <ul className={cn("flex flex-wrap gap-1 p-1", GROUP[variant])}>
         {items.map((item) => (
           <li key={item.href}>
-            <Link
-              href={item.href}
-              prefetch={prefetch}
-              aria-current={item.current ? "page" : undefined}
-              className={cn(
-                "relative block px-4 py-1.5 text-sm font-medium transition-colors outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-                ITEM[variant],
-                item.current
-                  ? ACTIVE[variant]
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {item.label}
-              <PendingTint />
-            </Link>
+            {item.disabled ? (
+              // A `<span>`, not a `<Link>` with the click swallowed: there is
+              // nothing behind this tab yet, so there is no destination to
+              // announce and nothing for a keyboard to visit. `aria-disabled`
+              // rather than `disabled` because this is not a form control, and
+              // the hint carries the reason for anyone who cannot see that it
+              // is dimmed — the visible explanation sits beside the group.
+              <span
+                data-slot="tab-disabled"
+                aria-disabled="true"
+                className={cn(
+                  "block px-4 py-1.5 text-sm font-medium text-muted-foreground opacity-60",
+                  ITEM[variant],
+                )}
+              >
+                {item.label}
+                {item.disabledHint ? (
+                  <span className="sr-only">{` — ${item.disabledHint}`}</span>
+                ) : null}
+              </span>
+            ) : (
+              <Link
+                href={item.href}
+                prefetch={prefetch}
+                aria-current={item.current ? "page" : undefined}
+                className={cn(
+                  "relative block px-4 py-1.5 text-sm font-medium transition-colors outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                  ITEM[variant],
+                  item.current
+                    ? ACTIVE[variant]
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {item.label}
+                <PendingTint />
+              </Link>
+            )}
           </li>
         ))}
       </ul>

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { AttendanceLock } from "@/components/attendance/attendance-lock";
 import { AttendanceButtons } from "@/components/attendance/status-buttons";
 import { SubmitButton } from "@/components/auth/submit-button";
 import { Alert } from "@/components/ui/alert";
@@ -17,7 +18,7 @@ import { PageShell } from "@/components/ui/page-shell";
 import { Select } from "@/components/ui/select";
 import { Tabs, type TabItem } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { ATTENDANCE_LABELS } from "@/lib/attendance";
+import { ATTENDANCE_LABELS, isAttendanceOpen } from "@/lib/attendance";
 import { weekStart } from "@/lib/calendar";
 import { loadSessionHomework, type SessionHomework } from "@/lib/homework";
 import {
@@ -64,6 +65,7 @@ import {
   type SessionAttendee,
 } from "@/lib/teacher";
 import {
+  formatCalendarDate,
   formatZonedDate,
   formatZonedTime,
   zonedCalendarDate,
@@ -178,11 +180,26 @@ type TabKey = (typeof TABS)[number]["key"];
  * `bands` falls back too when the class has no band scale — a General English
  * class has no such tab to select, and `?tab=bands` must not produce an empty
  * page with no way out of it.
+ *
+ * `attendance` falls back on exactly the same reasoning, for exactly the same
+ * shape of reason: before the lesson starts there is no register to select, so
+ * `?tab=attendance` typed into the address bar cannot select one. That is what
+ * makes the direct URL safe by construction rather than by a hidden form — the
+ * sheet, the four submit buttons and the bound `recordAttendance` are not
+ * rendered at all, so there is nothing on the page to submit. The visitor lands
+ * on the first panel beside `AttendanceLock`, which tells them when to come
+ * back. The rule itself is enforced in the Server Action; this is only which
+ * panel to draw.
  */
-function readTab(value: unknown, banded: boolean): TabKey {
+function readTab(
+  value: unknown,
+  banded: boolean,
+  attendanceOpen: boolean,
+): TabKey {
   const found = TABS.find((tab) => tab.key === value);
   if (!found) return "students";
   if (found.key === "bands" && !banded) return "students";
+  if (found.key === "attendance" && !attendanceOpen) return "students";
   return found.key;
 }
 
@@ -233,11 +250,22 @@ export default async function SessionPage({
   const banded = isBandScored(fields.courseType);
   const recordedOn = zonedCalendarDate(fields.timezone, session.startsAt);
 
+  // One instant for the whole render, so the tab, the panel and the countdown
+  // are all judged against the same moment. `starts_at` is a `timestamptz` and
+  // this is an instant, so the comparison needs no timezone — see
+  // `lib/attendance.ts`. The class's zone is used below only to *say* when the
+  // register opens.
+  const now = new Date();
+  const attendanceOpen = isAttendanceOpen(session.startsAt, now.getTime());
+  const startsToday =
+    recordedOn === zonedCalendarDate(fields.timezone, now.toISOString());
+
   const query = await searchParams;
   const error = typeof query.error === "string" ? query.error : undefined;
   const tab = readTab(
     typeof query.tab === "string" ? query.tab : undefined,
     banded,
+    attendanceOpen,
   );
 
   // The roster answers for three panels; the rest answer for one each. Every
@@ -276,6 +304,12 @@ export default async function SessionPage({
     label: entry.label,
     href: entry.key === "students" ? base : `${base}?tab=${entry.key}`,
     current: entry.key === tab,
+    // Visible, dimmed and not a link until the lesson starts. Kept in the strip
+    // rather than removed from it because the tab is a fact about this
+    // workspace: a teacher who cannot see it would look for it.
+    disabled: entry.key === "attendance" && !attendanceOpen,
+    disabledHint:
+      entry.key === "attendance" && !attendanceOpen ? "chưa mở" : undefined,
   }));
 
   return (
@@ -351,8 +385,31 @@ export default async function SessionPage({
       <Tabs
         items={items}
         label="Các mục của buổi học"
-        className="mt-6 mb-6"
+        className={attendanceOpen ? "mt-6 mb-6" : "mt-6 mb-3"}
       />
+
+      {/* Beneath the strip, so the dimmed tab has its reason next to it on
+          whichever panel the teacher is reading. Server-rendered and seeded
+          with this render's own instant, so it is right with JavaScript off and
+          merely stops counting; in a browser it ticks and asks the server for
+          the page again at the start minute. It explains the lock — it is not
+          the lock. See `recordAttendance`. */}
+      {attendanceOpen ? null : (
+        <AttendanceLock
+          startsAt={session.startsAt}
+          opensAtLabel={
+            // The day is only worth saying when it is not today. The header
+            // above already carries the full date; this line is one sentence.
+            startsToday
+              ? `lúc ${formatZonedTime(fields.timezone, session.startsAt)}`
+              : `lúc ${formatZonedTime(
+                  fields.timezone,
+                  session.startsAt,
+                )} ngày ${formatCalendarDate(recordedOn)}`
+          }
+          initialNow={now.getTime()}
+        />
+      )}
 
       {tab === "students" ? (
         <StudentsPanel attendees={attendees} standings={standings} />
@@ -574,6 +631,14 @@ function StudentsPanel({
  * `AttendanceButtons`. M12's optimistic `useFormStatus().data` mechanism and its
  * no-JavaScript fallback of one form with four submit buttons are exactly as
  * they were; this function only decides which of the three states to render.
+ *
+ * There is deliberately no fourth state for "the lesson has not started". This
+ * panel is only reached once it has: `readTab` cannot resolve to `attendance`
+ * while the register is shut, so nothing here — no form, no bound action, no
+ * submit button — is rendered before the start minute, and there is no locked
+ * variant of the sheet that could drift out of step with the working one. The
+ * explanation lives above the tab strip in `AttendanceLock`, and the rule that
+ * matters lives in `recordAttendance`.
  */
 function AttendancePanel({
   attendees,
