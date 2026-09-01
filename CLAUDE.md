@@ -5,10 +5,11 @@ Read it in full before starting any milestone. Do not ask the user for anything
 that is already answered here, in the repository, in git history, or in the
 current milestone prompt.
 
-Last updated: 2026-09-01, after M31. **M31 is UNCOMMITTED — it lives entirely
-in the working tree, by instruction.** M27 = `0269c0a`, M28 = `631a415`,
-M29 = `0431966`, M30 = `9c498b2`, all committed by the user. Earlier revisions
-of this file called M30 uncommitted; that is now stale.
+Last updated: 2026-09-01, after M32. **M32 is UNCOMMITTED — it lives entirely
+in the working tree.** M27 = `0269c0a`, M28 = `631a415`, M29 = `0431966`,
+M30 = `9c498b2`, M31 = `a68d13e`, all committed by the user. Earlier revisions
+of this file called M27 through M31 uncommitted; every one of those claims is
+now stale — the tree was clean when M32 began.
 
 ---
 
@@ -106,6 +107,13 @@ SMTP secrets into the Docker image.
   25 MB cap, the seven allowed MIME types, `materialStoragePath` (always
   `<class_id>/<uuid>`) and `signedMaterialUrl` (60 seconds). See decision **AM**;
   the migration behind it is **not applied**.
+- `lib/teacher-tasks.ts` — added in M32, server-only. The Dashboard To-do
+  panel's one module: `TaskPriority` + `TASK_PRIORITY_LABELS`, `taskClock`
+  (the single clock reading the panel renders from), `loadTeacherTasks` (the
+  whole sort and the 24-hour auto-hide expressed as *one query*),
+  `deadlineState` and `clearsInHours`. See decisions **AO**–**AQ**; the
+  migration behind it is **not applied**, so the loader returns `null` and the
+  panel shows the ordinary failed-read alert.
 - `lib/report-period.ts` — `MonthKey`, `parseMonth`, `currentMonth`,
   `monthLabel`, `monthRange`, `shiftMonth`, all on the class's timezone.
 - `lib/report-text.ts` — the report's shared presentation vocabulary, so the
@@ -459,7 +467,7 @@ If a change appears to require a migration, an RLS change, an RPC change, a new
 dependency, service-role access, or client-side protected data — **stop and
 explain the architectural impact before proceeding.**
 
-### Migrations (`supabase/migrations/`, 16 files — 15 applied, 1 not)
+### Migrations (`supabase/migrations/`, 17 files — 15 applied, 2 not)
 
 ```
 000100_extensions_and_schemas   000200_enums_and_domains
@@ -472,11 +480,18 @@ explain the architectural impact before proceeding.**
 001400_grants                   001500_seed_mistake_tags
 ```
 
-Plus **`20260901000100_class_materials.sql`**, written under M30 and
-**never executed against any database** — the user's instruction was "write
-migration, do NOT apply it". Its own header says so. Until a human runs it,
-`public.class_materials` does not exist and the Giáo trình tab renders the
-ordinary failed-read alert. See decision **AM**.
+Plus **two files that have never been executed against any database**, each
+written on the user's own instruction "write migration, do NOT apply it", each
+saying so in its own header:
+
+- **`20260901000100_class_materials.sql`** (M30). Until a human runs it,
+  `public.class_materials` does not exist and the Giáo trình tab renders the
+  ordinary failed-read alert. See decision **AM**.
+- **`20260901000200_teacher_tasks.sql`** (M32). Until a human runs it,
+  `public.teacher_tasks` does not exist and the Dashboard To-do panel renders
+  the same failed-read alert. See decision **AP**. `lib/database.types.ts`
+  carries the table and the `task_priority` enum hand-written so `tsc` passes,
+  exactly as it does for `class_materials`.
 
 **Do not execute migrations against the hosted Supabase project.** Do not modify
 existing migrations or RLS policies.
@@ -490,6 +505,9 @@ existing migrations or RLS policies.
 `score_entry_type(baseline,progress,mock_test)` · `homework_status` ·
 `report_status` · `payment_status` ·
 `member_status(improving,stable,needs_attention)`.
+
+The two unapplied migrations would add `task_priority(high,medium,low)`; no
+other enum is pending.
 
 ### Views
 
@@ -2039,35 +2057,237 @@ known gaps.
     renders the honest failed-read alert (decision **AM**).
 - **NO COMMIT WAS CREATED.**
 
-## 14. Current project state (verified 2026-09-01, after M31)
+### M32 — the teacher Dashboard rebuilt: sorted classes and a real To-do (**uncommitted**)
+
+- **Audited first, before any edit, and the audit changed the milestone.** The
+  Figma Make source's `pages/teacher/Dashboard.tsx` was re-read rather than
+  recalled: the updated design replaces M22's grid of tall stat tiles with a
+  **single compact strip**, puts **Classes** and a **To-do** side by side, and
+  paginates the class list. Three of the four earlier milestones found the
+  brief's "missing backend" premise answered by the schema (decision **B**);
+  this time **one half was and one half was not**, and the two halves were
+  reported separately.
+  - **Sorting the classes needed nothing new.** `classes.start_date` and
+    `end_date` already exist and `TeacherContext.classes` already carries them.
+  - **The To-do had nothing behind it at all.** A grep across all sixteen
+    migrations plus `app/`, `lib/` and `components/` for task / todo / reminder
+    found four adjacent columns and **not one of them fits**:
+    `homework_assignments.due_date` is a *student's* deadline and is visible to
+    students, `tuition_records.reminder_sent_at` is a timestamp on an invoice,
+    `class_members.invite_reminder_count` is a counter, and
+    `monthly_reports.status = 'draft'` is a report's own lifecycle. Overloading
+    any of them would make an existing column mean two different things
+    depending on who wrote the row. The Figma's own To-do is `useState` over
+    five hardcoded strings, so there was nothing to reuse on that side either.
+  - **Both open questions were put to the user rather than inferred**, as §2 of
+    the brief required. The answers: **"write the migration, do NOT apply it"**
+    (the `class_materials` precedent), and **keep** M22's "Học viên cần chú ý"
+    list, full width below the two columns.
+
+**Part 1 — the Classes section sorts, and nothing else moves**
+
+- **`start_date` DESC is the definition of "latest", and it is derived, not
+  stored.** `end_date` would rank a finished class above a running one, and
+  `created_at` ranks by when a row was typed rather than by when teaching
+  happens. Session data was considered and rejected: "most recent session"
+  would need a second query per class and would sink a class whose lessons have
+  not been scheduled yet.
+- **The sort is on a page-local copy** — `[...classes].sort(byStartDateDesc)` —
+  exactly as §1 of the brief and decision **AG** both require. `lib/teacher.ts`
+  is **untouched** (`git diff` empty), so `/teacher/calendar`'s positional
+  `CLASS_TONES` colouring and four other pages' filter-pill order are
+  unaffected. The comparator returns **0** on a tie, so `Array.prototype.sort`'s
+  stability preserves the incoming `created_at` DESC order for free.
+- **Pagination is `?page=`**, five classes a page, a
+  `<nav aria-label="Trang lớp học">` of numbered `<Link>`s with
+  `aria-current="page"`, rendered only when there is more than one page and with
+  page 1 linking to bare `/teacher`. `readPage` clamps anything unparseable,
+  negative or out of range to a real page rather than erroring — the M25/M27
+  precedent for a malformed query value.
+- Each row is a whole-card `<Link>` carrying `PendingTint`, the band `Badge`
+  (`bandTone`: ≥7 green, ≥6 primary, ≥5.5 neutral, else orange), the real
+  `schedule_note` or "Chưa đặt lịch học", the student and improving counts, and
+  the `aria-hidden` per-student segment strip M23 corrected.
+
+**Part 2 — the To-do panel is real, and honest about not being connected yet**
+
+- **`supabase/migrations/20260901000200_teacher_tasks.sql` is written and has
+  never been executed** — the second such file; `20260901000100_class_materials.sql`
+  is the first. `public.teacher_tasks`: `teacher_id` FK to `profiles`, `title`
+  with a 1..300 trimmed CHECK, `public.task_priority` declared **high, medium,
+  low** so Postgres's own enum ordering *is* the Figma's comparator, nullable
+  `due_date`, nullable `completed_at` — plus one owner index, RLS **enabled and
+  FORCEd**, a single `teacher_tasks_owner_all` policy gated on
+  `teacher_id = auth.uid() and app.is_teacher()`, grants to `authenticated`, and
+  the existing `app.set_updated_at` trigger. Until a human runs it the table
+  does not exist, `loadTeacherTasks` returns `null`, and the panel renders **the
+  ordinary failed-read alert** — which is what was observed.
+- **`lib/teacher-tasks.ts`** (server-only) is the one module. `taskClock(zone)`
+  returns the single `{ today, now }` the whole panel is rendered from, so the
+  deadline labels and the auto-hide countdown cannot disagree across midnight.
+  The zone is `calendarZone(classes)` — `profiles` has no timezone column, and
+  this is the answer `lib/calendar.ts` already settled for the calendar's own
+  "today". **No `toISOString().slice(0, 10)` anywhere.**
+- **The 24-hour auto-hide is a query filter, not a cron and not a delete.** One
+  `.or("completed_at.is.null,completed_at.gte.<cutoff>")` on the same statement
+  that does the sort: the row keeps existing, it simply stops being listed.
+- **`app/teacher/actions.ts`** (new) holds `createTask`, `setTaskDone` and
+  `removeTask`. Each re-derives the teacher through `requireTeacher()` and puts
+  `teacher_id` **in the same statement as the write**, so a forged task id
+  matches no row rather than someone else's and "not yours" is indistinguishable
+  from "not there". `setTaskDone` submits the **state it wants** (`done=1|0`)
+  rather than "toggle", so two rapid clicks converge instead of racing.
+  `readDueDate` refuses a malformed date rather than quietly dropping it, and
+  re-checks calendar validity through a `Date.UTC` round trip so `2026-02-31` is
+  rejected.
+- **`components/dashboard/todo-panel.tsx`** is a **Server** Component and adds
+  **no** client component — the count is still eight. The Figma's `useState`
+  panel became: a `<details>`/`<summary>` disclosure instead of the icon-only
+  `+` (which has no accessible name and no behaviour without JavaScript);
+  `peer sr-only` radios drawn as the Figma's priority pills instead of three
+  toggle buttons; and an **always-visible** remove `×` instead of
+  `opacity-0 group-hover:opacity-100`, which is unreachable by touch. Every
+  interaction is a real `<form>` posting to a Server Action.
+- **`components/ui/stat-card.tsx` gained a fourth shape**, `layout="inline"`, for
+  the updated Figma's compact strip: the same tinted square as shape 2 but
+  *beside* the number, on `px-4 py-3`, value at `text-base`, label at 11px. No
+  new file, so the shared-primitive count is still **19**.
+
+**Verified against the production standalone build on `localhost:3000`**
+
+- **The pure logic: 49 assertions, 49 passed, 0 failed, no production write.**
+  `byStartDateDesc`, `bandTone` and `readPage` were **extracted verbatim by
+  regex from the shipped `app/teacher/page.tsx`**, and `daysBetween`,
+  `deadlineState` and `clearsInHours` from the shipped `lib/teacher-tasks.ts`,
+  then run through Node's type stripping against the real `lib/time.ts` —
+  neither is a retyped copy. Covered: sort order, tie stability, non-mutation of
+  the shared array and a year boundary; `?page=` clamping on `abc`, `-3`, `0`,
+  `99` and a bare parameter; the band-tone edges at exactly 7.0, 6.0 and 5.5;
+  deadline labels across month, year and leap-day boundaries; the countdown
+  clamped at both 1 and 24; and the timezone cases where a naive UTC slice
+  differs — `2026-08-31T18:00Z` is `2026-09-01` in `Asia/Ho_Chi_Minh` and
+  `2026-08-31` in UTC, which flips a deadline's label from **Quá hạn** to
+  **Hôm nay**.
+- **The Server Actions were exercised live**, and the honest failure path *is*
+  the correct observed behaviour: `createTask` redirected to
+  `?error=Chúng tôi chưa thêm được công việc. Vui lòng thử lại.` while the real
+  `PGRST205 Could not find the table 'public.teacher_tasks' in the schema cache`
+  went to the **server log only**. No raw Postgres error reached the browser and
+  nothing was written. All four refusals fire with their own message: a blank
+  title, 301 characters, a `priority` forced to `urgent` client-side, and
+  `2026-02-31`.
+- **The populated panel was measured on a temporary, clearly-named, now-deleted
+  `app/m32-preview` route** (decision **J**), because the table does not exist
+  and this teacher's only class is production data. Measured: priority dots
+  `rgb(180,35,24)` / `rgb(232,131,74)` / `rgb(197,195,187)`; Quá hạn / Hôm nay /
+  Ngày mai pills red and `15/09` muted; the **done** row's Quá hạn pill
+  correctly muted rather than red; `Ẩn sau 17 giờ`; the footer
+  "1 việc đã xong · tự ẩn sau 24 giờ"; `medium` default-checked; and the empty
+  state. Six widths, 0 problems; 0 nameless controls, 0 unlabelled inputs. The
+  route was deleted, its absence confirmed by `find` **and** by a 404 on the
+  rebuilt server, before the route count was read.
+- **Responsive:** 8 teacher paths × 6 widths (1280/1024/768/390/360/320) =
+  **48 combinations, 0 problems** — no page-level horizontal scroll
+  (`window.scrollTo(9999,0)` then `window.scrollX`) and nothing clipped.
+- **Accessibility: 0 real problems** on 8 pages. Exactly one `h1`; zero
+  duplicate ids, zero unlabelled inputs, zero exposed avatars; one
+  `aria-current` per labelled landmark, with the new `Trang lớp học` pagination
+  as its own. The single reported "nameless control" is the **M31 instrument
+  artefact** — the `Thêm` submit inside the collapsed `<details>`, whose
+  `innerText` is empty by definition; opening the disclosure gives **0**.
+- **Focus rings by real Tab traversal** (`Input.dispatchKeyEvent`, with a 260 ms
+  settle for the CSS transition): 19 tab stops on `/teacher`, 14 measured
+  `solid 2px`; the four `Input` primitives settle to
+  `border-color: rgb(68,102,238)` = `--primary` plus a 2px ring, which is the
+  primitive's documented indicator and not a defect; the remaining stop is
+  Chrome's own date-picker widget. The priority radios are correctly **one** tab
+  stop, with `solid 2px` on the peer span.
+- **No-JS** (`Emulation.setScriptExecutionDisabled`): `/teacher` renders its
+  `h1`, seven nav links, the `<details>`, all three radios, both fields and the
+  class link as a real `href`; `pendingTints` is **0**; both forms serialise as
+  `action="" enctype="multipart/form-data" method="POST"`.
+- **Console: 0 errors, 0 warnings** across 8 paths × 2 widths.
+- **Security:** anonymous **307 → `/auth/login`** on `/teacher`,
+  `/teacher/classes`, `/teacher/calendar` and `/student`; the student account
+  (logged in on a second Chrome profile on port 9223, so the teacher session
+  stayed intact) is redirected to `/student` from all five teacher routes
+  probed.
+- **Regression:** the M31 session workspace still shows its six tabs, its
+  **four** attendance buttons (`present/late/absent/excused` — M12 intact), the
+  `<details>` schedule editor and `Lịch dạy` active; the now-line is present on
+  the current week (2 nodes) and absent on `2026-08-24` (0); M29's class list
+  still renders its six `th scope="col"`; **M27 exports still produce real
+  files** — per-student PDF **13,563** bytes (`%PDF`), DOCX **2,919**, student
+  XLSX **5,062**, class-wide XLSX **3,349** (all `PK`). `git diff` is **empty**
+  for `components/attendance/`, the applied migrations, `proxy.ts`,
+  `lib/supabase/`, `app/auth/actions.ts`, `app/onboarding/actions.ts`,
+  `app/join/`, `app/teacher/settings/actions.ts`, all of
+  `app/teacher/[classId]/`, `components/shell/`, `components/calendar/`,
+  `lib/score.ts`, `lib/monthly-report.ts`, `lib/export/`, `lib/student.ts`,
+  `lib/teacher.ts` and `lib/calendar.ts`; `useFormStatus` is still at
+  `components/attendance/status-buttons.tsx:46`.
+- `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ · **28 routes**
+  (25 `page.tsx` + 3 `route.ts`), unchanged from M31, no preview or debug route.
+- Diff: **3 files changed, 378 insertions(+), 163 deletions(-)**, plus 4 new
+  files — `app/teacher/actions.ts` (191), `lib/teacher-tasks.ts` (231),
+  `components/dashboard/todo-panel.tsx` (354) and the unapplied
+  `supabase/migrations/20260901000200_teacher_tasks.sql` (128).
+
+- **Limitations:**
+  - **The To-do migration is not applied**, by instruction, so the panel's whole
+    populated life — creating, ticking, un-ticking, removing, the sort and the
+    24-hour filter — is **type-checked, logic-tested and code-reviewed, not
+    exercised against a database**. What was observed live is the failed-read
+    alert and the four validation refusals, which are the correct behaviour for
+    a table that is not there. `lib/database.types.ts` carries the table and the
+    enum **hand-written**, following the `class_materials` precedent, so `tsc`
+    passes; regenerating the types once the migration is run should produce the
+    same shape.
+  - Production has exactly **one** class, so the sort, the pagination and the
+    band-tone badges were exercised against the shipped functions from Node
+    rather than screenshotted. Creating a second class is a production write.
+  - The Figma's Dashboard still carries a "Recent Progress" feed with no query
+    behind it. It was not built, exactly as in M21 and M22 (decision **P**).
+  - The Figma's To-do is `useState` over hardcoded strings: the design shows the
+    *shape* of the feature and has no persistence to be faithful to. Every
+    behavioural difference from it is listed under Part 2 and argued in JSDoc.
+- **NO COMMIT WAS CREATED.**
+
+## 14. Current project state (verified 2026-09-01, after M32)
 
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `9c498b2` — ":hammer: rebuild teacher calendar and session workspace"
-  (M30, committed by the user). M27 = `0269c0a`, M28 = `631a415`,
-  M29 = `0431966`. Earlier revisions of this file called M27 through M30
-  uncommitted; all four are stale. |
+| HEAD | `a68d13e` — ":hammer: improve teacher calendar scheduling and session
+  workspace" (M31, committed by the user). M27 = `0269c0a`, M28 = `631a415`,
+  M29 = `0431966`, M30 = `9c498b2`. Earlier revisions of this file called M27
+  through M31 uncommitted; every one of those claims is stale. |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
-| Working tree | **NOT clean — M31 is uncommitted, by instruction.** Eight
-  modified source files, one renamed (`git mv`) source file and two new source
-  files, plus this file. |
+| Working tree | **NOT clean — M32 is uncommitted.** Three modified source files
+  (`app/teacher/page.tsx`, `components/ui/stat-card.tsx`,
+  `lib/database.types.ts`), four new files (`app/teacher/actions.ts`,
+  `lib/teacher-tasks.ts`, `components/dashboard/todo-panel.tsx` and the
+  unapplied `supabase/migrations/20260901000200_teacher_tasks.sql`), plus this
+  file. |
 | Routes | **28** (25 `page.tsx` + 3 `route.ts`: `app/auth/callback/route.ts`,
   `app/teacher/reports/export/route.ts` and
-  `app/teacher/[classId]/materials/[materialId]/route.ts`). M31 added no route
-  handler; the count rose because the session workspace moved under
-  `/teacher/calendar/` and the **old path stayed behind as a redirect stub**. |
-| Migrations | **16 files, 15 applied.** The sixteenth,
-  `20260901000100_class_materials.sql`, is in the tree and **has never been
-  executed against any database** — written under M30 at the user's explicit
+  `app/teacher/[classId]/materials/[materialId]/route.ts`). M32 added none —
+  the To-do's three Server Actions live in `app/teacher/actions.ts`, which is
+  not a route. |
+| Migrations | **17 files, 15 applied and TWO not.**
+  `20260901000100_class_materials.sql` (M30) and
+  `20260901000200_teacher_tasks.sql` (M32) are both in the tree and **have never
+  been executed against any database** — each written at the user's explicit
   instruction ("write migration, do NOT apply it"). |
-| RLS | enabled + FORCEd on 13 tables. The unapplied migration would add a
-  fourteenth (`public.class_materials`) plus three `storage.objects` policies. |
-| Client components | still **eight** — M31 added none. It rewrote
-  `components/calendar/session-drag.tsx` (now a two-axis drag with a preview
-  ghost) and left `components/calendar/now-line.tsx` alone. Both still render
-  nothing without JavaScript. |
-| Shared primitives | still **19** — M30 and M31 added none and changed none |
+| RLS | enabled + FORCEd on 13 tables. The two unapplied migrations would add a
+  fourteenth and a fifteenth (`public.class_materials`, `public.teacher_tasks`),
+  plus three `storage.objects` policies. |
+| Client components | still **eight** — M32 added none. Its To-do panel is a
+  Server Component whose whole interaction surface is `<details>`, `peer
+  sr-only` radios and real `<form>`s posting to Server Actions. |
+| Shared primitives | still **19** — M32 added no file. `components/ui/stat-card.tsx`
+  gained a **fourth shape** (`layout="inline"`), which is a variant, not a
+  primitive. |
 | Dependencies | unchanged since M27 (`pdf-lib`, `@pdf-lib/fontkit`). Still no
   i18n library, no charting library, no calendar library, no drag-and-drop
   library, no AI SDK; `lucide-react` is installed and imported nowhere. |
@@ -2091,7 +2311,8 @@ not from a single averaged "one round trip" figure.
 /onboarding/teaching-type                      .../teaching-type/page.tsx
 /onboarding/class                              .../class/page.tsx
 /onboarding/invite                             .../invite/page.tsx
-/teacher                                       app/teacher/page.tsx                  (dashboard)
+/teacher                                       app/teacher/page.tsx                  (dashboard; ?page= paginates the class list,
+                                                                                     ?error= carries a To-do action failure)
 /teacher/classes                               app/teacher/classes/page.tsx
 /teacher/calendar                              app/teacher/calendar/page.tsx         (?week=YYYY-MM-DD)
 /teacher/calendar/session/[sessionId]          .../calendar/session/[sessionId]/page.tsx
@@ -2121,7 +2342,8 @@ not from a single averaged "one round trip" figure.
 
 Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
 `app/join/[code]/actions.ts`, `app/teacher/[classId]/actions.ts`,
-`app/teacher/settings/actions.ts`.
+`app/teacher/settings/actions.ts` and — added in M32 — `app/teacher/actions.ts`
+(`createTask`, `setTaskDone`, `removeTask`).
 
 ---
 
@@ -2412,6 +2634,59 @@ Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
   down must write nothing — the raw comparison made every such gesture a silent
   one-minute nudge, which is how the bug was found. Minute-level precision
   belongs to the form.
+
+
+- **AO.** **The Dashboard sorts a copy, and "latest" means `start_date` DESC.**
+  The class list on `/teacher` is `[...classes].sort(byStartDateDesc)` — a
+  page-local array, never `loadTeacherClassList`'s `ORDER BY`. Decision **AG**
+  explains the cost of the alternative and M32's brief asked for the same thing
+  independently: `TeacherContext.classes` feeds five other pages, and
+  `/teacher/calendar` indexes `CLASS_TONES` **positionally**, so reordering the
+  shared read would recolour the calendar. `start_date` is the right key
+  because `end_date` ranks a finished class above a running one and `created_at`
+  ranks by when a row was typed rather than by when teaching happens; session
+  data was considered and rejected because "most recent session" costs a query
+  per class and sinks a class whose lessons are not scheduled yet. The
+  comparator **must keep returning 0 on a tie** — `Array.prototype.sort` is
+  stable and the rows arrive `created_at` DESC, so same-day starts keep
+  newest-created first for free. Pagination is `?page=` over that sorted copy,
+  and `readPage` clamps rather than errors.
+- **AP.** **`public.teacher_tasks` is the one table this project accepted it had
+  to add, and the migration is written and NOT applied.** M22, M27 and M30 all
+  found the brief's "missing backend" premise already answered by the schema
+  (decision **B**); M32's To-do genuinely was not. Four adjacent columns were
+  examined and each was rejected for the same reason — it already means
+  something else to someone else: `homework_assignments.due_date` is a
+  *student's* deadline and students can read it,
+  `tuition_records.reminder_sent_at` is a timestamp on an invoice,
+  `class_members.invite_reminder_count` is a counter, and
+  `monthly_reports.status = 'draft'` is a report's own lifecycle. The user was
+  **asked** and answered "write the migration, do NOT apply it", so
+  `supabase/migrations/20260901000200_teacher_tasks.sql` sits in the tree
+  unexecuted beside `20260901000100_class_materials.sql`, `lib/database.types.ts`
+  carries the table and the `task_priority` enum **hand-written** so `tsc`
+  passes, and `loadTeacherTasks` returns `null` at runtime so the panel shows
+  the ordinary failed-read alert. `null` and `[]` are different states and this
+  feature keeps them different: a teacher told "no tasks" would stop looking.
+  When it is applied: RLS enabled **and** FORCEd, one
+  `teacher_tasks_owner_all` policy on `teacher_id = auth.uid() and
+  app.is_teacher()`, and every Server Action still carrying `teacher_id` in the
+  same statement as the write.
+- **AQ.** **The To-do's 24-hour auto-hide is a query filter, its priority order
+  is the enum's own, and none of it is a client component.** A ticked task
+  disappears after a day because `loadTeacherTasks` adds
+  `completed_at.gte.<cutoff>` to the `or()` — not a cron this project has no
+  infrastructure for, and not a delete that would destroy a record the teacher
+  may still want. `public.task_priority` is declared **high, medium, low**, so
+  Postgres's enum ordering reproduces the Figma's `ORDER.indexOf` comparator
+  without a second copy of it in TypeScript, and the whole sort happens in the
+  database. The panel itself is a **Server** Component: the Figma's `useState`
+  list became a `<details>` disclosure, `peer sr-only` radios and real `<form>`s
+  posting to `createTask` / `setTaskDone` / `removeTask`, so it works with
+  JavaScript disabled and the client-component count stayed at eight. Do not
+  reintroduce the icon-only `+` (no accessible name, no no-JS behaviour) or the
+  hover-revealed `×` (unreachable by touch). `setTaskDone` submits the **state
+  it wants**, never "toggle", so two rapid clicks converge.
 
 Additional standing constraints from the user, still in force:
 

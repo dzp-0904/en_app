@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
  * surface with `p-6` and a shadow, which is a different object — the stat tile
  * is 12px, unelevated, and tighter.
  *
- * THREE SHAPES, because the Figma draws three and they are not interchangeable.
+ * FOUR SHAPES, because the Figma draws four and they are not interchangeable.
  *
  *   1. Bare — the class-detail row above the roster. `p-4`, the value in
  *      `text-xl font-semibold`, the label under it.
@@ -33,6 +33,13 @@ import { cn } from "@/lib/utils";
  *      `p-5`, no square at all, the label *above* a `font-bold` number that
  *      carries the colour itself. M22 rendered these as shape 2, which is why
  *      "Tổng học phí" grew a near-black dot the Figma never draws.
+ *
+ *   4. `layout="inline"` — the updated Dashboard's compact summary strip. The
+ *      same tinted square as shape 2, but beside the number rather than above
+ *      it, on `px-4 py-3` with the value at `text-base` and the label at 11px.
+ *      M32's Figma replaced the Dashboard's 2x4 grid of tall tiles with a
+ *      single row of these, which is a different object at a different size —
+ *      not shape 2 in a narrower column.
  *
  * There is deliberately no `navy` tone. The Figma's tinted marks are only ever
  * `#4466EE`, `#3BA876` and `#E8834A`; `#1B2036` appears in this family exactly
@@ -74,15 +81,20 @@ function StatCard({
   tone?: keyof typeof TONES;
   /** Colours the number itself — Tuition's collected/outstanding pair. */
   valueTone?: keyof typeof VALUE_TONES;
-  /** Tuition puts its label above the number; everything else puts it below. */
-  layout?: "value-first" | "label-first";
+  /**
+   * Tuition puts its label above the number; everything else puts it below.
+   * `inline` keeps the value-then-label order but lays the mark out beside it.
+   */
+  layout?: "value-first" | "label-first" | "inline";
 }) {
   const labelFirst = layout === "label-first";
+  const inline = layout === "inline";
 
   const labelNode = (
     <p
       className={cn(
-        "text-xs text-muted-foreground",
+        inline ? "text-[11px] leading-tight" : "text-xs",
+        "text-muted-foreground",
         labelFirst ? "mb-2" : "mt-0.5",
       )}
     >
@@ -95,7 +107,11 @@ function StatCard({
       data-slot="stat-card"
       className={cn(
         "min-w-0 rounded-xl border border-border bg-card",
-        tone || labelFirst ? "p-5" : "p-4",
+        inline
+          ? "flex items-center gap-3 px-4 py-3"
+          : tone || labelFirst
+            ? "p-5"
+            : "p-4",
         className,
       )}
       {...props}
@@ -104,28 +120,39 @@ function StatCard({
         <span
           aria-hidden
           className={cn(
-            "mb-3 flex size-8 items-center justify-center rounded-lg",
+            "flex shrink-0 items-center justify-center rounded-lg",
+            inline ? "size-7" : "mb-3 size-8",
             TONES[tone].tint,
           )}
         >
-          <span className={cn("size-2.5 rounded-full", TONES[tone].dot)} />
+          <span
+            className={cn(
+              "rounded-full",
+              inline ? "size-2" : "size-2.5",
+              TONES[tone].dot,
+            )}
+          />
         </span>
       ) : null}
 
-      {labelFirst ? labelNode : null}
+      {/* `min-w-0` so a long value truncates inside the row rather than
+          widening it — decision AH, in miniature. */}
+      <div className={cn(inline && "min-w-0")}>
+        {labelFirst ? labelNode : null}
 
-      <p
-        className={cn(
-          "truncate",
-          tone ? "text-2xl" : "text-xl",
-          labelFirst ? "font-bold" : "font-semibold",
-          VALUE_TONES[valueTone ?? "foreground"],
-        )}
-      >
-        {value}
-      </p>
+        <p
+          className={cn(
+            "truncate",
+            inline ? "text-base leading-tight" : tone ? "text-2xl" : "text-xl",
+            labelFirst ? "font-bold" : "font-semibold",
+            VALUE_TONES[valueTone ?? "foreground"],
+          )}
+        >
+          {value}
+        </p>
 
-      {labelFirst ? null : labelNode}
+        {labelFirst ? null : labelNode}
+      </div>
     </div>
   );
 }

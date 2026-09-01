@@ -928,6 +928,47 @@ export type Database = {
           },
         ]
       }
+      teacher_tasks: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          due_date: string | null
+          id: string
+          priority: Database["public"]["Enums"]["task_priority"]
+          teacher_id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          priority?: Database["public"]["Enums"]["task_priority"]
+          teacher_id: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          priority?: Database["public"]["Enums"]["task_priority"]
+          teacher_id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "teacher_tasks_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tuition_records: {
         Row: {
           amount_total: number | null
@@ -1179,6 +1220,7 @@ export type Database = {
       scoring_model: "ielts_band" | "none"
       session_status: "scheduled" | "completed" | "cancelled"
       skill: "reading" | "listening" | "writing" | "speaking" | "general"
+      task_priority: "high" | "medium" | "low"
     }
     CompositeTypes: {
       [_ in never]: never
