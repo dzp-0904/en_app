@@ -704,8 +704,12 @@ async function authoriseSession(
     failTo(classPath, "Chúng tôi chưa tải được buổi học này. Vui lòng thử lại.");
   }
 
-  // Built from two segments that have now both been proved. Nothing submitted
-  // names a destination.
+  // Built from a segment that has now been proved. Nothing submitted names a
+  // destination, and nothing chooses between two of them: the workspace has one
+  // canonical URL and it is under the calendar, so every action in this file
+  // returns the teacher to the section they were in. See the note on
+  // `app/teacher/calendar/session/[sessionId]/page.tsx` for why that is one
+  // path rather than an origin-sensitive pair.
   return {
     supabase,
     teacherId,
@@ -714,7 +718,7 @@ async function authoriseSession(
     // Which decides whether this class keeps bands at all — see
     // `scoringModelFor`. A proved value, not a submitted one.
     courseType: fields.courseType,
-    sessionPath: `/teacher/${classId}/sessions/${sessionId}`,
+    sessionPath: `/teacher/calendar/session/${sessionId}`,
   };
 }
 
@@ -1290,7 +1294,8 @@ async function rescheduleSession(
 }
 
 /**
- * Moves one session to another day, keeping its time of day and its length.
+ * Moves one session to another slot on the grid — another day, another time of
+ * day, or both — keeping its length.
  *
  * ## What a drag actually moves
  *
@@ -1302,6 +1307,22 @@ async function rescheduleSession(
  * class actually meets. A block on the calendar is therefore exactly one
  * lesson, and moving it moves exactly that lesson. The schedule sentence on the
  * class is untouched, because it never generated these rows in the first place.
+ *
+ * ## The time comes off the grid, and the grid is a wall clock
+ *
+ * A drop now carries a start time as well as a date, because a calendar in
+ * which vertical movement means nothing is a calendar that can only be used for
+ * half of what it draws. The value is a `HH:MM` **wall clock on the class's own
+ * timezone** — the grid's vertical axis is that clock and nothing else, so the
+ * client sends minutes-past-midnight as text and `instantOf` does the one
+ * conversion to an instant, exactly as the date-and-times form does. There is
+ * no UTC arithmetic on either side of the wire, and the snapping the client
+ * applies is a courtesy rather than a rule: any valid `HH:MM` is accepted here,
+ * because the accessible form may send a time no grid would ever snap to and
+ * the two paths must not disagree about what is legal.
+ *
+ * An absent time means "keep the one it has", which is what the milestone's
+ * original date-only drag did and what a form that omits the field would mean.
  *
  * ## Why this one returns instead of redirecting
  *
@@ -1331,7 +1352,7 @@ async function rescheduleSession(
  * is what keeps the calendar from ever showing a lesson on a day the database
  * disagrees with.
  */
-export async function moveSessionToDate(
+export async function moveSessionToSlot(
   _previous: MoveResult,
   formData: FormData,
 ): Promise<MoveResult> {
@@ -1354,9 +1375,22 @@ export async function moveSessionToDate(
     return { error: "Ngày không hợp lệ. Vui lòng thử lại." };
   }
 
-  // Dropping a lesson back on the day it is already on is a no-op, not a
-  // failure — and not a write either.
-  if (zonedCalendarDate(timezone, session.startsAt) === date) {
+  const wasOn = zonedCalendarDate(timezone, session.startsAt);
+  const wasAt = formatZonedTime(timezone, session.startsAt);
+
+  const submitted = readText(formData, "startTime");
+  const startTime = submitted === "" ? wasAt : submitted;
+
+  if (!ISO_TIME.test(startTime)) {
+    return { error: "Giờ không hợp lệ. Vui lòng thử lại." };
+  }
+
+  // Dropped back on the slot it already occupies: a no-op, not a failure — and
+  // not a write either. Both halves have to match, because either one alone can
+  // now be the thing the drag changed. `HH:MM` against `HH:MM` is a string
+  // comparison of two values `formatZonedTime` produced, so there is no
+  // seconds-precision trap in it.
+  if (wasOn === date && wasAt === startTime.slice(0, 5)) {
     return { ok: true };
   }
 
@@ -1366,7 +1400,7 @@ export async function moveSessionToDate(
     session,
     timezone,
     date,
-    formatZonedTime(timezone, session.startsAt),
+    startTime,
     new Date(session.endsAt).getTime() - new Date(session.startsAt).getTime(),
   );
 

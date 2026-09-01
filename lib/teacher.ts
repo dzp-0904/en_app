@@ -685,6 +685,92 @@ export async function loadClassSession(
 }
 
 /**
+ * One lesson, found from its own id, with the class it belongs to.
+ *
+ * The workspace lives at `/teacher/calendar/session/<session id>` — under the
+ * calendar, because that is the section a teacher is in when they open a lesson
+ * — and that path carries no class segment. So the class has to be resolved
+ * rather than supplied, which is what this does, and it does it in **one**
+ * statement rather than two.
+ *
+ * ## Why resolving is safer than being told
+ *
+ * `loadClassSession` puts both ids in the WHERE clause precisely so a mismatched
+ * pair matches nothing. Here there is no pair to mismatch: the session id
+ * selects the row, and `classes.teacher_id = <session user>` on the embedded
+ * class is what decides whether that row is this teacher's. The join is
+ * `!inner`, so a session whose class belongs to someone else does not come back
+ * at all — there is no row in this process to compare and then discard, and
+ * therefore no comparison to get wrong. Underneath, `class_sessions_teacher_all`
+ * admits only `app.my_class_ids()` and `classes_teacher_all` only the teacher's
+ * own classes, so the same answer is enforced twice more.
+ *
+ * `archived_at is null` is applied to the class for the same reason
+ * `loadEditableClass` applies it: an archived class is not editable, and a
+ * lesson inside one must not be either.
+ *
+ * ## Three arms, and they mean what they mean everywhere else here
+ *
+ * A failed query is `error`, never `not-found`. A session that does not exist
+ * and a session belonging to another teacher are the same `not-found`, so a 404
+ * says nothing about what other teachers run.
+ */
+export type TeacherSessionResult =
+  | { kind: "ok"; session: ClassSession; classId: string; fields: TeacherClassFields }
+  | { kind: "not-found" }
+  | { kind: "error" };
+
+export async function loadTeacherSession(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  teacherId: string,
+  sessionId: string,
+): Promise<TeacherSessionResult> {
+  // Before the round trip, so a mistyped link is a 404 rather than `22P02
+  // invalid input syntax for type uuid` arriving as a server fault.
+  if (!UUID.test(sessionId)) return { kind: "not-found" };
+
+  const { data: found, error } = await supabase
+    .from("class_sessions")
+    .select(`${SESSION_COLUMNS}, class_id, classes!inner(${CLASS_COLUMNS})`)
+    .eq("id", sessionId)
+    .eq("classes.teacher_id", teacherId)
+    .is("classes.archived_at", null)
+    .maybeSingle();
+
+  if (error) {
+    logDbError("class_sessions.select(with class)", error);
+    return { kind: "error" };
+  }
+
+  if (!found) return { kind: "not-found" };
+
+  const owner = found.classes;
+
+  return {
+    kind: "ok",
+    classId: found.class_id,
+    session: {
+      sessionId: found.id,
+      startsAt: found.starts_at,
+      endsAt: found.ends_at,
+      title: found.title,
+      status: found.status,
+    },
+    fields: {
+      classId: owner.id,
+      className: owner.name,
+      courseType: owner.course_type,
+      courseTypeOther: owner.course_type_other,
+      targetBand: owner.target_band,
+      startDate: owner.start_date,
+      endDate: owner.end_date,
+      scheduleNote: owner.schedule_note,
+      timezone: owner.timezone,
+    },
+  };
+}
+
+/**
  * The class's active students, each with whatever attendance this session has
  * recorded for them.
  *

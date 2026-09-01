@@ -1082,11 +1082,13 @@ function Lessons({
                 </TableCell>
 
                 <TableCell className="whitespace-nowrap">
-                  {/* The link carries both segments, and the page behind it
-                      proves both — the session id alone does not select the
-                      lesson. */}
+                  {/* The workspace's one canonical address, which lives under
+                      the calendar. The class id is not in it and does not need
+                      to be: the page resolves the class *from* the session,
+                      through a join filtered on the authenticated teacher, so
+                      the id alone selects the lesson and nothing else. */}
                   <Link
-                    href={`/teacher/${classId}/sessions/${session.sessionId}`}
+                    href={`/teacher/calendar/session/${session.sessionId}`}
                     className="rounded-sm text-xs font-medium text-primary outline-none hover:underline focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                   >
                     Mở

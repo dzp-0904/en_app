@@ -12,6 +12,7 @@ import { PageShell } from "@/components/ui/page-shell";
 import { PendingTint } from "@/components/ui/pending-tint";
 import {
   CLASS_TONES,
+  SLOT_HEIGHT,
   TONE_DOT,
   calendarZone,
   gridRange,
@@ -68,6 +69,14 @@ export const metadata: Metadata = {
  * children, one hint line and nothing else, and the calendar behaves exactly as
  * it did before. Moving a lesson without a pointer is the date and time form on
  * the session's own page, which the hint names.
+ *
+ * THE DRAG READS BOTH AXES. A grid whose horizontal axis is the day and whose
+ * vertical axis is the time was, until now, being dragged along one of them:
+ * the drop took the column and kept the old time of day. It now takes the
+ * pointer's height inside the column as well, snapped to a quarter hour, so a
+ * lesson can be moved to another day, to another hour, or to both in one
+ * gesture. The three numbers that make that arithmetic possible — the drawn
+ * window and the height of an hour — are handed to `SessionDrag` below.
  */
 
 /** `?week=` is the only parameter, and it is validated before use. */
@@ -235,7 +244,17 @@ export default async function TeacherCalendarPage({
         // An empty week still gets its grid. A calendar that vanishes when
         // nothing is booked is not a calendar; the week is said in the header
         // instead, where the month already is.
-        <SessionDrag>
+        //
+        // The grid's geometry is passed down rather than imported by the
+        // drag: `lib/calendar.ts` is `server-only`, and these three numbers are
+        // what turn a pointer's y back into a time. They are the same values
+        // `WeekGrid` positions with, from the same call, so the two cannot
+        // read the grid differently.
+        <SessionDrag
+          startHour={startHour}
+          endHour={endHour}
+          slotHeight={SLOT_HEIGHT}
+        >
           <WeekGrid
             days={days}
             sessions={sessions}

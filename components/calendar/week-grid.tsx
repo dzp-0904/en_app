@@ -31,11 +31,22 @@ import { cn } from "@/lib/utils";
  * freezing at the moment the page was rendered. Red is `--destructive`, this
  * palette's only red, so nothing was added to the design tokens; indigo was the
  * wrong choice for it anyway, being the same colour as the *primary* class tone
- * and as today's date disc. Each block also gained `draggable` and four data
+ * and as today's date disc. Each block also gained `draggable` and six data
  * attributes, and each day column gained its date — `components/calendar/
  * session-drag.tsx` reads them by delegation. This file is still a Server
  * Component and every lesson is still a real `<a href>`; nothing about the
  * grid depends on JavaScript.
+ *
+ * The six are the session and its class (what to move), the date and the start
+ * time it currently sits on (so a drop that lands back where it started can be
+ * recognised and dropped on the floor), and its length in minutes (so the drag
+ * can preview the block at its real height and the server can be handed a start
+ * that still leaves room for it). `data-from-time` and the second line of the
+ * block are the same string, because they are the same fact.
+ *
+ * The block links to `/teacher/calendar/session/<id>` — the workspace's one
+ * canonical URL, which lives under the calendar so that opening a lesson from
+ * here keeps Lịch dạy the section the teacher is in.
  *
  * WHY THE BLOCK IS A CHILD OF ITS COLUMN. The Figma positions all 7×n blocks
  * against the grid itself with `left: calc(56px + col * ((100% - 56px) / 7))`.
@@ -255,7 +266,7 @@ export function WeekGrid({
                     return (
                       <Link
                         key={lesson.sessionId}
-                        href={`/teacher/${lesson.classId}/sessions/${lesson.sessionId}`}
+                        href={`/teacher/calendar/session/${lesson.sessionId}`}
                         // The block is a link first and a drag handle second.
                         // Click, Enter, middle-click and "open in new tab" all
                         // still do what they do on any other link; `draggable`
@@ -266,6 +277,8 @@ export function WeekGrid({
                         data-session-id={lesson.sessionId}
                         data-class-id={lesson.classId}
                         data-from-date={lesson.date}
+                        data-from-time={lesson.startTime}
+                        data-duration={lesson.endMinutes - lesson.startMinutes}
                         // The 2px inset on each side is the Figma's: it is what
                         // keeps two consecutive lessons from sharing an edge.
                         style={{ top: top + 2, height: box - 4 }}

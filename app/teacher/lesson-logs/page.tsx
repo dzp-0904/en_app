@@ -37,7 +37,7 @@ export const metadata: Metadata = {
  * The same `lesson_logs` rows the session page shows one lesson at a time, read
  * across every class in reverse chronological order. This is a reading screen:
  * the Figma pairs the list with an inline "+ Add Lesson Note" form, and writing
- * a note already has a home — `/teacher/[classId]/sessions/[sessionId]`, where
+ * a note already has a home — `/teacher/calendar/session/[sessionId]`, where
  * the note is attached to the lesson it is about and the roster it applies to
  * is already loaded. A second form here would be a second write path to the
  * same table with a different idea of which session a note belongs to, so the

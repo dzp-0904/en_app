@@ -5,9 +5,10 @@ Read it in full before starting any milestone. Do not ask the user for anything
 that is already answered here, in the repository, in git history, or in the
 current milestone prompt.
 
-Last updated: 2026-09-01, after M30. **M30 is UNCOMMITTED — it lives entirely
+Last updated: 2026-09-01, after M31. **M31 is UNCOMMITTED — it lives entirely
 in the working tree, by instruction.** M27 = `0269c0a`, M28 = `631a415`,
-M29 = `0431966`, all committed by the user.
+M29 = `0431966`, M30 = `9c498b2`, all committed by the user. Earlier revisions
+of this file called M30 uncommitted; that is now stale.
 
 ---
 
@@ -1850,35 +1851,226 @@ known gaps.
     the existing design system.
 - **NO COMMIT WAS CREATED.**
 
-## 14. Current project state (verified 2026-09-01, after M30)
+### M31 — two-axis calendar drag, and the workspace moved under Lịch dạy (**uncommitted**)
+
+- **Inspected before editing, as the brief required, and no migration was
+  needed.** `class_sessions.starts_at` / `ends_at` are the authoritative
+  `timestamptz` instants and `classes.timezone` is the wall clock they are read
+  on; nothing else records when a lesson happens. A vertical drag therefore
+  needs no new column, no new table and no RLS change — it needs the existing
+  `rescheduleSession` to be told a time as well as a date. **Zero migrations,
+  zero RLS/RPC/grant/schema changes, zero new dependencies, and no new client
+  component** (still eight).
+
+**Part 1 — the drag reads both axes**
+
+- **`moveSessionToDate` became `moveSessionToSlot`** and now reads `startTime`
+  beside `date`. The value is an `HH:MM` **wall clock on the class's own
+  timezone** — the grid's vertical axis is that clock and nothing else — and
+  `instantOf` does the single conversion, exactly as the accessible form does.
+  There is no UTC arithmetic on either side of the wire. An **absent** time
+  means "keep the one it has", so the original date-only drag is still
+  expressible and a form that omits the field still means what it meant. The
+  server validates against the same `ISO_TIME` the form path uses and accepts
+  **any** valid minute, not only quarter hours: the accessible editor may
+  legitimately send 19:07 and the two paths must not disagree about what is
+  legal. `rescheduleSession` itself is **unchanged** — it already took a time.
+- **The client maps the pointer to a slot** in
+  `components/calendar/session-drag.tsx`, inverting `week-grid.tsx`'s own
+  formula rather than re-deriving it: the grab offset is recorded on
+  `dragstart`, so the block lands where it *looks* like it will rather than
+  where the cursor is, and `snapInto` rounds to **`SNAP = 15`** minutes, clamps
+  into the drawn window, and floors the late edge so that **every** value the
+  drag can produce is a quarter hour — the clamped one included. A 4h06 lesson
+  pushed to the foot of a 06:00–22:00 grid lands on 17:45 (ending 21:51), not on
+  whatever odd minute `endHour − duration` happens to be.
+- **Duration is preserved in milliseconds**, unchanged from decision **AI**, so
+  the DST behaviour it documents is untouched.
+- **The geometry is passed in as props, not imported.** `lib/calendar.ts` is
+  `server-only`, so `app/teacher/calendar/page.tsx` hands `startHour`, `endHour`
+  and `SLOT_HEIGHT` to `SessionDrag`. One source of truth, and the client bundle
+  still does not pull in a server module.
+- **Still not optimistic** (decision **AK**). The drop fills the real hidden
+  `<form>` and submits it; the block moves when the server says it moved. What
+  the drag *does* draw is a **preview ghost** — `position: fixed`,
+  `pointer-events-none`, `aria-hidden`, dashed primary border, labelled
+  `HH:MM–HH:MM` and exactly as tall as the lesson lasts. It is a fixed-position
+  React element rather than a node inserted into the server-rendered grid, so
+  React never reconciles around a child it did not create, and it renders
+  **nothing** without JavaScript.
+- **A real defect was found in verification and fixed: the no-op guard could not
+  fire for a lesson that does not start on a quarter hour.** The one production
+  lesson starts at **12:01**; snapping means a drop back onto its own slot
+  yields 12:00, so `startTime === fromTime` was false and the hidden form was
+  populated — picking the block up and putting it back down would have written a
+  silent one-minute nudge. The client now compares against the **snapped
+  origin** (`snapInto(minutesOf(fromTime), duration)`), so "unchanged" means the
+  same quarter-hour slot on the same day. Minute-level precision belongs to the
+  form, which is exactly where it stays. The server keeps its own guard on the
+  stored minute; the two are complementary, not duplicates.
+
+**Part 2 — the workspace lives under the calendar**
+
+- **One canonical URL, reached by `git mv`, not by a copy.** The workspace moved
+  `app/teacher/[classId]/sessions/[sessionId]/page.tsx` →
+  `app/teacher/calendar/session/[sessionId]/page.tsx`. **Nothing was
+  duplicated**, no modal was introduced, and the six M30 tabs are the same six.
+- **`sessionPath` changed in exactly one place** — inside `authoriseSession` —
+  so all nine session Server Actions return the teacher to the calendar context
+  with **zero action bodies touched**. `recordAttendance` is **byte-identical**
+  (66 lines, diffed against HEAD).
+- **`Nav` needed no change at all**: it picks the active section by longest
+  matching href, so anything under `/teacher/calendar/` lights **Lịch dạy** on
+  its own. Measured: the workspace shows `Lịch dạy` active on every tab, while
+  `/teacher/<id>` still shows `Lớp học` — the two contexts stay distinct.
+- **Because the class id left the URL, `loadTeacherSession` (new, `lib/teacher.ts`)
+  resolves the class *from* the session** via `classes!inner` filtered on
+  `teacher_id` — **one round trip fewer** than M30's two-step chain, and a
+  mismatched (class, session) pair is no longer constructible at all.
+- **The old path is a 40-line `permanentRedirect` stub** that is deliberately
+  unconditional and touches no database, so it cannot be used as an existence
+  oracle: a foreign class, a foreign session and a non-uuid all 308 to the same
+  shape of URL, and the destination then answers. Deep links keep working.
+- **Breadcrumb** is now `Lịch dạy → <class> → Buổi học` (the trail and the
+  sidebar name the same section, and decision **M** is honoured — the last crumb
+  is the page). **`Quay lại Lịch dạy`** derives its week from the session's own
+  date, `weekStart(zonedCalendarDate(tz, startsAt))`, so it is right however the
+  teacher arrived *and* points at the new week after a reschedule.
+- `app/teacher/calendar/not-found.tsx` (new, 44 lines) gives the segment its own
+  styled Vietnamese 404, and the class-detail "Mở" link plus two JSDoc
+  references were repointed.
+
+**Verified against the production standalone build on `localhost:3000`**
+
+- **The pointer→slot mapping and the server arithmetic: 53 assertions, 53
+  passed, 0 failed, no production write.** The client half is **extracted
+  verbatim by regex from the shipped `session-drag.tsx`** and the server half
+  runs against the real `lib/time.ts` through Node's type stripping — neither is
+  a retyped copy. Covered: the grab offset (grabbed 40px in, the block lands
+  where it looks); snapping at 7/9/16/32px; every result a multiple of 15;
+  clamping at both edges including the 4h06 case; a widened `gridRange` window;
+  `clockOf` wrapping rather than printing 24:30; day-and-time, time-only and
+  day-only moves; the 2027-01-01 00:30 lesson stored as 2026-12-31 UTC; a DST
+  fall-back (90 real minutes, wall clock apparently +30) and a spring-forward
+  (+150) on the same duration; and both no-op guards, client and server.
+- **The drag itself, exercised in the browser on NO-WRITE paths only.** Every
+  submit was intercepted with `preventDefault()`, and the row was re-read
+  afterwards: `2026-08-26 12:01`, 246 minutes, top 601, height 258 — **unmoved,
+  nothing written to production.** Measured: `dragover` on another column is
+  `defaultPrevented`, washes that column, and paints the ghost at
+  **14:00–18:06**, `position: fixed`, `pointer-events: none`,
+  `aria-hidden="true"`, inset 2px into the hovered column, **258px tall (the
+  duration, preserved)**, 127px below the block for the two hours hovered; one
+  hour further down relabels **15:00–19:06** and moves 64px. `dragend` clears
+  both wash and ghost with **zero** submits and an empty form. **Dropping back
+  on its own slot: zero submits and all four form fields still empty** — the
+  fixed guard. A drop that really moves it fills `date=2026-08-24`,
+  `startTime=13:30` (the 1.5 hours hovered, from the 12:00 slot) and **does not
+  move the block** — no optimistic mutation.
+- **Responsive:** 10 paths × 6 widths (1280/1024/768/390/360/320) = **60
+  page-width combinations, 0 problems.** No page-level horizontal scroll
+  (`window.scrollTo(9999,0)` then `window.scrollX`) and no clipping. The
+  calendar region reproduces M30's figures exactly — 968/968, 712/712, 696/696,
+  then scrolling inside its own labelled region at 324, 294, 254 over 672.
+- **Accessibility: 0 problems** on 8 calendar and workspace views. Exactly one
+  `h1`; zero duplicate ids, zero unlabelled inputs, zero exposed avatars; one
+  `aria-current` per labelled landmark (`Điều hướng chính`, `Đường dẫn`,
+  `Các mục của buổi học`, and `Lưới lịch tuần:date` on the current week). The
+  one "nameless control" the sweep reported is an **instrument artefact**: the
+  `Lưu lịch` submit sits inside the collapsed `<details>`, where `innerText` is
+  empty by definition — opening the disclosure gives **0**. Focus rings measured
+  by **real Tab traversal** (`Input.dispatchKeyEvent`): **13/13 controls on the
+  calendar and 17/17 on the workspace are `solid` ≥2px.**
+- **The accessible alternative is intact** (decision **AK**): the `<details>`
+  editor is present on every tab, labelled `Ngày` / `Giờ bắt đầu` /
+  `Giờ kết thúc`, prefilled with the session's real `2026-08-26`, `12:01`,
+  `16:07`.
+- **No-JS** (`Emulation.setScriptExecutionDisabled`) on 8 paths: the block is a
+  real `<a href>`, six tab links, seven nav links, breadcrumbs, week links, the
+  `<details>` editor and every form render. **`pendingTints` / `animate-pulse`
+  and the ghost are 0 everywhere.** The attendance tab still emits all four
+  values `present / late / absent / excused` — **M12 intact**. The now-line is
+  present on the current week (2 nodes) and absent on `2026-08-24` (0).
+- **Console: 0 errors, 0 warnings** across all 8 views.
+- **Security.** Anonymous: **307 → `/auth/login`** on the calendar, both
+  calendar-session URLs (real *and* foreign id, identically) and the class list.
+  The **student account** (logged in on a second browser profile, so the teacher
+  session stayed intact) is bounced **307 → `/`** from all eight teacher routes
+  probed, again identically for a real and a foreign session id. As the
+  **teacher**: the real session 200; a foreign uuid **404**; a non-uuid
+  **404** — indistinguishable; `?tab=bogus` falls back to 200 rather than
+  erroring. The old path 308s for all four of (real class + real session),
+  (foreign class + real session), (real class + foreign session) and
+  (non-uuid + non-uuid).
+- **Regression.** M29's class list still renders its six `th scope="col"` and
+  its real row; the class-detail tabs still move `aria-current` through
+  Học viên / Buổi học / Thông tin lớp under `Các mục của lớp`; all eight teacher
+  pages render one `h1` and seven nav links; **M27 exports still produce real
+  files** — per-student PDF 14,967 bytes (`%PDF`), DOCX 3,238 and XLSX 5,205
+  (both `PK`), class-wide XLSX 3,352. `git diff` is **empty** for
+  `components/attendance/`, `supabase/`, `proxy.ts`, `lib/supabase/`,
+  `app/auth/actions.ts`, `app/onboarding/actions.ts`, `app/join/`,
+  `app/teacher/settings/actions.ts`, `components/ui/`, `components/shell/`,
+  `lib/score.ts`, `lib/monthly-report.ts`, `lib/export/` and `lib/student.ts`;
+  `useFormStatus` is still at `components/attendance/status-buttons.tsx:46`.
+- `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ · **28 routes**
+  (25 `page.tsx` + 3 `route.ts`), no preview or debug route.
+- Diff: **9 files changed, 489 insertions(+), 105 deletions(-)** (the workspace
+  counted as a rename, 80+/49−), plus 2 new files totalling 84 lines.
+
+- **Limitations:**
+  - **A real cross-day, cross-time drop was never committed to the database.**
+    The only class in production is `IELTS Evening Group B` and moving its one
+    session is a production write. What was exercised is the full wiring up to
+    and including the populated form, on paths where the submit was intercepted,
+    plus 53 assertions on the arithmetic underneath. The successful
+    `UPDATE … returning id` and the `23505` duplicate-start branch remain
+    code-reviewed only, exactly as in M30.
+  - **HTML5 drag and drop was driven by synthesised `DragEvent`s**, not by a
+    real pointer. That exercises every listener the component installs, but it
+    does not prove the browser's native drag image or its `dragleave` timing.
+  - The ghost is drawn from **viewport** coordinates, so a page scrolled during a
+    drag would leave it one frame behind. `dragover` fires continuously and
+    corrects it on the next sample; it is a preview, and nothing depends on it.
+  - **`score_entries` still do not follow a moved lesson** — they hang off
+    `recorded_on` (§6), not `session_id`. Unchanged from M30, still documented in
+    `rescheduleSession`'s JSDoc.
+  - The materials migration is **still not applied**, so the Giáo trình tab still
+    renders the honest failed-read alert (decision **AM**).
+- **NO COMMIT WAS CREATED.**
+
+## 14. Current project state (verified 2026-09-01, after M31)
 
 | | |
 |---|---|
 | Branch | `main` |
-| HEAD | `0431966` — ":hammer: rebuild teacher class list as detailed table" (M29,
-  committed by the user). M27 = `0269c0a`, M28 = `631a415`. Earlier revisions of
-  this file called M27, M28 and M29 uncommitted; all three are stale. |
+| HEAD | `9c498b2` — ":hammer: rebuild teacher calendar and session workspace"
+  (M30, committed by the user). M27 = `0269c0a`, M28 = `631a415`,
+  M29 = `0431966`. Earlier revisions of this file called M27 through M30
+  uncommitted; all four are stale. |
 | Remote | `https://github.com/dzp-0904/en_app.git` |
-| Working tree | **NOT clean — M30 is uncommitted, by instruction.** Seven
-  modified source files, five new source files, one new (unapplied) migration,
-  plus this file. |
-| Routes | **27** (24 `page.tsx` + 3 `route.ts`: `app/auth/callback/route.ts`,
-  `app/teacher/reports/export/route.ts` and, new in M30,
-  `app/teacher/[classId]/materials/[materialId]/route.ts`) |
+| Working tree | **NOT clean — M31 is uncommitted, by instruction.** Eight
+  modified source files, one renamed (`git mv`) source file and two new source
+  files, plus this file. |
+| Routes | **28** (25 `page.tsx` + 3 `route.ts`: `app/auth/callback/route.ts`,
+  `app/teacher/reports/export/route.ts` and
+  `app/teacher/[classId]/materials/[materialId]/route.ts`). M31 added no route
+  handler; the count rose because the session workspace moved under
+  `/teacher/calendar/` and the **old path stayed behind as a redirect stub**. |
 | Migrations | **16 files, 15 applied.** The sixteenth,
   `20260901000100_class_materials.sql`, is in the tree and **has never been
   executed against any database** — written under M30 at the user's explicit
   instruction ("write migration, do NOT apply it"). |
 | RLS | enabled + FORCEd on 13 tables. The unapplied migration would add a
   fourteenth (`public.class_materials`) plus three `storage.objects` policies. |
-| Client components | **eight** — M30 added `components/calendar/now-line.tsx`
-  (the ticking current-time line, which must re-read the clock) and
-  `components/calendar/session-drag.tsx` (drag and drop, which is a pointer
-  gesture). Both are enhancements that render nothing without JavaScript. |
-| Shared primitives | still **19** — M30 added none and changed none |
+| Client components | still **eight** — M31 added none. It rewrote
+  `components/calendar/session-drag.tsx` (now a two-axis drag with a preview
+  ghost) and left `components/calendar/now-line.tsx` alone. Both still render
+  nothing without JavaScript. |
+| Shared primitives | still **19** — M30 and M31 added none and changed none |
 | Dependencies | unchanged since M27 (`pdf-lib`, `@pdf-lib/fontkit`). Still no
-  i18n library, no charting library, no calendar library, no AI SDK;
-  `lucide-react` is installed and imported nowhere. |
+  i18n library, no charting library, no calendar library, no drag-and-drop
+  library, no AI SDK; `lucide-react` is installed and imported nowhere. |
 | Gates | `tsc --noEmit` ✓ · `npm run lint` ✓ · `npm run build` ✓ |
 
 **Measured hop costs against this hosted Supabase project** (from Node, outside
@@ -1902,6 +2094,10 @@ not from a single averaged "one round trip" figure.
 /teacher                                       app/teacher/page.tsx                  (dashboard)
 /teacher/classes                               app/teacher/classes/page.tsx
 /teacher/calendar                              app/teacher/calendar/page.tsx         (?week=YYYY-MM-DD)
+/teacher/calendar/session/[sessionId]          .../calendar/session/[sessionId]/page.tsx
+                                                                                     (the session workspace — moved here in M31 so
+                                                                                      the sidebar keeps Lịch dạy active; tabs:
+                                                                                      ?tab=attendance|homework|materials|notes|bands)
 /teacher/lesson-logs                           app/teacher/lesson-logs/page.tsx      (?class= &skill=)
 /teacher/reports                               app/teacher/reports/page.tsx
 /teacher/reports/export                        app/teacher/reports/export/route.ts   (?class= &month= &student= &format=pdf|docx|xlsx)
@@ -1911,8 +2107,11 @@ not from a single averaged "one round trip" figure.
 /teacher/[classId]                             app/teacher/[classId]/page.tsx        (tabs: ?tab=lessons|info)
 /teacher/[classId]/edit                        .../edit/page.tsx
 /teacher/[classId]/sessions/new                .../sessions/new/page.tsx
-/teacher/[classId]/sessions/[sessionId]        .../sessions/[sessionId]/page.tsx     (the M30 session workspace; tabs:
-                                                                                      ?tab=attendance|homework|materials|notes|bands)
+/teacher/[classId]/sessions/[sessionId]        .../sessions/[sessionId]/page.tsx     (M31: a permanentRedirect stub only.
+                                                                                      308s to the calendar URL above, unconditionally
+                                                                                      and without a database read, so it cannot be
+                                                                                      used as an existence oracle. Old links keep
+                                                                                      working; nothing else lives here.)
 /teacher/[classId]/materials/[materialId]      .../materials/[materialId]/route.ts   (signed-URL redirect, teacher-only)
 /student                                       app/student/page.tsx                  (class chooser)
 /student/[classId]                             app/student/[classId]/page.tsx        (the Figma student dashboard;
@@ -2118,10 +2317,13 @@ Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
   labels display-only, and `class_sessions` is authoritative. So a drag changes
   one lesson and never a pattern, the schedule sentence on the class is not
   rewritten behind the teacher's back, and no "does this repeat?" prompt is
-  needed. The move preserves the time of day and the duration **in
-  milliseconds**, which is deliberate: across a DST transition a 90-minute
-  lesson stays 90 minutes of teaching even though its wall-clock end reads an
-  hour differently. Do not "fix" that by preserving wall-clock end instead.
+  needed. The move preserves the duration **in milliseconds**, which is
+  deliberate: across a DST transition a 90-minute lesson stays 90 minutes of
+  teaching even though its wall-clock end reads an hour differently. Do not
+  "fix" that by preserving wall-clock end instead. (M31: the *time of day* is no
+  longer preserved either — a drag now sets it, because the grid's vertical axis
+  is a clock. See decision **AN**. Everything else here is unchanged: one row,
+  never a pattern, and `schedule_note` is still not rewritten.)
 - **AJ.** **The current-time line is `--destructive` (#b42318) and it must be
   able to be absent.** Red is the one colour in this palette that is not already
   carrying a meaning on the calendar — indigo is the primary class tone *and*
@@ -2143,13 +2345,33 @@ Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
   server says it moved. Both routes go through the **one** `rescheduleSession`
   core, so the accessible path and the pointer path cannot disagree — which is
   also why there is deliberately no status guard blocking the move of a
-  `completed` session. Note the consequence and do not paper over it:
+  `completed` session, and why the server accepts any valid `HH:MM` rather than
+  only the quarter hours a drag can express (decision **AN**). Since M31 the
+  form is not merely an alternative but the **only** minute-precise route: a
+  drag speaks in fifteens. The drop draws a preview ghost while the pointer is
+  down — `fixed`, `pointer-events-none`, `aria-hidden`, and nothing at all
+  without JavaScript — but the block itself does not move until the server says
+  it moved. Note the consequence and do not paper over it:
   `score_entries` hang off `recorded_on` (§6), not `session_id`, so moving a
   lesson leaves that day's marks on the old date.
-- **AL.** **The session workspace extends `/teacher/[classId]/sessions/[sessionId]`;
-  it is not a second route.** Clicking a lesson navigates to a real URL rather
-  than opening a client modal, so it is bookmarkable, works with Back and
-  Forward, works without JavaScript and is reachable by a keyboard. Its tabs are
+- **AL.** **The session workspace is `/teacher/calendar/session/[sessionId]` —
+  one canonical URL, under the calendar, and never a second copy.** M31 moved it
+  there with `git mv` (not a copy) so that the sidebar keeps **Lịch dạy** active
+  when a lesson is opened from the calendar: `Nav` picks its active section by
+  longest matching href, so the move alone did the job and `components/shell/`
+  was not touched. `sessionPath` changed in exactly **one** place — inside
+  `authoriseSession` — so all nine session Server Actions follow, with zero
+  action bodies edited and `recordAttendance` byte-identical. The class id left
+  the URL, so `loadTeacherSession` resolves the class *from* the session through
+  `classes!inner` filtered on the teacher: one round trip fewer, and a
+  mismatched (class, session) pair is not constructible. The **old path stays as
+  an unconditional `permanentRedirect` stub that reads no database**, so old
+  links and bookmarks keep working and a 308 reveals nothing about whether the
+  id exists. Do not restore a page there, and do not make the workspace's URL
+  depend on where the teacher came from — two entry points would be two things
+  to keep in step. Clicking a lesson navigates to a real URL rather than opening
+  a client modal, so it is bookmarkable, works with Back and Forward, works
+  without JavaScript and is reachable by a keyboard. Its tabs are
   the brief's four in the brief's order — **Danh sách học sinh · Điểm danh ·
   Bài tập · Giáo trình** — followed by **Ghi chú** and **Band điểm**, which are
   M13's existing features and were not deleted to match a spec that did not
@@ -2169,6 +2391,27 @@ Server Actions live in `app/auth/actions.ts`, `app/onboarding/actions.ts`,
   `app/teacher/[classId]/materials/[materialId]/route.ts` resolves the row first
   and takes the storage path **from the row**, never from the request. There is
   no service-role key in the application and none is to be added (§8, §9).
+- **AN.** **The drag reads both axes, and a slot is a quarter hour.** Horizontal
+  movement changes the day, vertical movement changes the time, and a diagonal
+  drag changes both — anything less makes half of what the grid draws
+  undraggable. The client inverts `week-grid.tsx`'s own placement formula rather
+  than re-deriving the geometry, records the grab offset on `dragstart` so the
+  block lands where it *looks* like it will, and snaps to **15 minutes**;
+  `snapInto` also floors the late clamp, so **every** value a drag can produce
+  is a quarter hour, the clamped one included. The grid's geometry is **passed
+  in as props** (`startHour`, `endHour`, `slotHeight`) because `lib/calendar.ts`
+  is `server-only` — one source of truth, and the client bundle still does not
+  pull in a server module. What crosses the wire is `HH:MM` on the **class's**
+  wall clock, converted once by `instantOf`, and the duration is preserved in
+  milliseconds exactly as decision **AI** requires. The server accepts **any**
+  valid minute, not only quarter hours, because the accessible form may send
+  19:07 and the two paths must not disagree about what is legal. **Snapping is a
+  client courtesy; validation is a server rule.** And the no-op guard compares
+  the drop against the lesson's **snapped origin**, not its stored minute: a
+  lesson at 12:01 draws in the 12:00 slot, so picking it up and putting it back
+  down must write nothing — the raw comparison made every such gesture a silent
+  one-minute nudge, which is how the bug was found. Minute-level precision
+  belongs to the form.
 
 Additional standing constraints from the user, still in force:
 

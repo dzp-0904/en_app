@@ -41,7 +41,7 @@ export const metadata: Metadata = {
  * One lesson, as the student sees it: when it was, whether they were marked
  * there, and what their teacher wrote about them.
  *
- * The mirror of `/teacher/[classId]/sessions/[sessionId]`, and deliberately not
+ * The mirror of `/teacher/calendar/session/[sessionId]`, and deliberately not
  * a copy of it. There is no attendance control, no roster, no other student's
  * name, no note-writing form and no Server Action anywhere in this route — a
  * student's copy of all of this is a report, not a form.
